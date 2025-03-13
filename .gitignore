@@ -1,0 +1,9 @@
+build
+.startup_shown
+bookmarks.json
+config.json
+upmenuerror.log
+dist/.startup_shown
+dist/bookmarks.json
+dist/config.json
+dist/upmenuerror.log

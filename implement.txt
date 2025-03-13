@@ -1,0 +1,31 @@
+auto update
+send the code to the server
+✅ quick web bookmarks
+✅ keyboard shortcut to open the menu
+✅ scrollable icon menu
+
+
+
+
+{
+    "startup_enable": true,
+    "apps": {
+        "Cursor": "C:/Users/bibek/AppData/Local/Programs/cursor/Cursor.exe",
+        "LM Studio": "C:/Users/bibek/AppData/Local/Programs/LM Studio/LM Studio.exe",
+        "Rave": "C:/Users/bibek/AppData/Local/Programs/rave-desktop/Rave.exe",
+        "msedge": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+        "Code": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code/Code.exe",
+        "IDMan": "C:/Program Files (x86)/Internet Download Manager/IDMan.exe",
+        "msedge_proxy": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge_proxy.exe",
+        "GitHubDesktop": "C:/Users/bibek/AppData/Local/GitHubDesktop/GitHubDesktop.exe",
+        "1EyeCare": "D:/Programming/program exercise/Python/eye care/dist/1EyeCare.exe",
+        "Codes": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code/Code.exe",
+        "Arc": "C:/Users/bibek/AppData/Local/Microsoft/WindowsApps/Arc.exe",
+        "speed-monitor": "D:/Programming/program exercise/Python/network speed monitor/compiled/dist/speed-monitor.exe",
+        "msedge_proxyy": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge_proxy.exe",
+        "UpMenu": "D:/Programming/program exercise/Python/UpMenu/menu.py"
+    }
+}
+
+
+store bookmarks in config.json
