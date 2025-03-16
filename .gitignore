@@ -1,5 +1,6 @@
 build
 .startup_shown
+shortcuts.json
 bookmarks.json
 config.json
 upmenuerror.log
@@ -7,3 +8,4 @@ dist/.startup_shown
 dist/bookmarks.json
 dist/config.json
 dist/upmenuerror.log
+dist/network_speed_monitor.log

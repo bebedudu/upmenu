@@ -1,5 +1,4 @@
-# code arranged in order of execution
-# logging and printing and notification are added
+# added context menu in menu
 
 import os
 import sys
@@ -18,6 +17,9 @@ import subprocess
 import webbrowser
 import win32process
 import tkinter as tk
+import keyboard as kb
+from tkinter import ttk
+import pygetwindow as gw
 from pynput import keyboard
 from datetime import datetime
 from urllib.parse import quote
@@ -29,7 +31,6 @@ from PIL import Image, ImageGrab, ImageTk
 from pynput.keyboard import Key, Controller
 from tkinter import messagebox, filedialog, simpledialog
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-from tkinter import ttk
 
 # Image paths
 APP_NAME = "UpMenu"
@@ -46,12 +47,15 @@ app_launcher_ref = None  # Reference to the app launcher frame
 update_app_buttons_ref = None  # Store reference to update function
 # Add global variable for keyboard listener
 keyboard_listener = None
-default_shortcuts = {
-    "Show/Hide Menu": "<ctrl>+<alt>+m",
-    "Take Screenshot": "<ctrl>+<alt>+s",
-    "Open Calculator": "<ctrl>+<alt>+c",
-    "Open Homepage": "<ctrl>+<alt>+h",
-    "Restart Programs": "<ctrl>+<alt>+r"
+# Variable to store the currently selected window title
+selected_window_title = None
+DEFAULT_SHORTCUTS = {
+    "Show Hide Menu": "ctrl+alt+m",
+    "Take Screenshot": "ctrl+alt+s",
+    "Open Calculator": "ctrl+alt+c",
+    "Open Homepage": "ctrl+alt+h",
+    "Restart Programs": "ctrl+alt+r",
+    "Toggle Brightness": "ctrl+alt+b"
 }
 
 # In global variables section, add:
@@ -179,6 +183,7 @@ except Exception as e:
     raise SystemExit(f"Error: Unable to create config file. {e}") 
 bookmarks_file = os.path.join(app_dir, "bookmarks.json")
 shortcuts_file = os.path.join(app_dir, "shortcuts.json")
+SHORTCUTS_FILE = os.path.join(app_dir, "shortcuts.json")
 
 # Notification function
 # ----------------------------------------------------------------------------------
@@ -323,51 +328,74 @@ def load_all_images():
     """Preload all images used in the application"""
     global images
     
-    # List of all images and their subsample factors
-    image_configs = {
-        'search': ('assets/images/search.png', 15),
-        'backward': ('assets/images/backward.png', 15),
-        'playpause': ('assets/images/playpause.png', 15),
-        'forward': ('assets/images/forward.png', 15),
-        'volumemute': ('assets/images/volumemute.png', 15),
-        'volumeup': ('assets/images/volumeup.png', 15),
-        'shutdown': ('assets/images/shutdown.png', 15),
-        'restart': ('assets/images/restart.png', 15),
-        'desktop': ('assets/images/desktop.png', 15),
-        'taskmenu': ('assets/images/taskmenu3.png', 15),
-        'lock': ('assets/images/lockscreen.png', 15),
-        'screenshot': ('assets/images/screenshot1.png', 15),
-        'brightness0': ('assets/images/brightness0.png', 15),
-        'brightness25': ('assets/images/brightness25.png', 15),
-        'brightness50': ('assets/images/brightness50.png', 15),
-        'brightness75': ('assets/images/brightness75.png', 15),
-        'brightness100': ('assets/images/brightness100.png', 15),
-        'homepage': ('assets/images/homepage.png', 15),
-        'calculator': ('assets/images/calculator.png', 15),
-        # 'camera': ('assets/images/screenshot.png', 15),
-        # 'cameraoff': ('assets/images/screenshot1.png', 15),
-        'leftarrow': ('assets/images/leftarrow.png', 15),  # Add this line
-        'rightarrow': ('assets/images/rightarrow.png', 15),  # Add this line
-    }
-    
-    # Load each image
-    for name, (path, subsample) in image_configs.items():
-        try:
-            # Check if file exists before loading
-            if not os.path.exists(path):
-                logging.error(f"Image file not found: {path}")
-                continue
+    try:
+        # Get the directory where the script is located
+        if getattr(sys, 'frozen', False):
+            # Running as exe
+            script_dir = os.path.dirname(sys.executable)
+        else:
+            # Running as script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Log directories for debugging
+        current_dir = os.getcwd()
+        logging.info(f"Current working directory: {current_dir}")
+        logging.info(f"Script directory: {script_dir}")
+        
+        # List of all images and their subsample factors
+        image_configs = {
+            'search': ('assets/images/search.png', 15),
+            'backward': ('assets/images/backward.png', 15),
+            'playpause': ('assets/images/playpause.png', 15),
+            'forward': ('assets/images/forward.png', 15),
+            'volumemute': ('assets/images/volumemute.png', 15),
+            'volumeup': ('assets/images/volumeup.png', 15),
+            'shutdown': ('assets/images/shutdown.png', 15),
+            'restart': ('assets/images/restart.png', 15),
+            'desktop': ('assets/images/desktop.png', 15),
+            'taskmenu': ('assets/images/taskmenu3.png', 15),
+            'lock': ('assets/images/lockscreen.png', 15),
+            'screenshot': ('assets/images/screenshot1.png', 15),
+            'brightness0': ('assets/images/brightness0.png', 15),
+            'brightness25': ('assets/images/brightness25.png', 15),
+            'brightness50': ('assets/images/brightness50.png', 15),
+            'brightness75': ('assets/images/brightness75.png', 15),
+            'brightness100': ('assets/images/brightness100.png', 15),
+            'homepage': ('assets/images/homepage.png', 15),
+            'calculator': ('assets/images/calculator.png', 15),
+            # 'camera': ('assets/images/screenshot.png', 15),
+            # 'cameraoff': ('assets/images/screenshot1.png', 15),
+            'leftarrow': ('assets/images/leftarrow.png', 15),  # Add this line
+            'rightarrow': ('assets/images/rightarrow.png', 15),  # Add this line
+        }
+        
+        # Load each image
+        for name, (path, subsample) in image_configs.items():
+            try:
+                # Create absolute path by joining script directory with relative path
+                abs_path = os.path.join(script_dir, path)
                 
-            # Use a more efficient approach for loading images
-            img = Image.open(path)
-            # Resize the image instead of using subsample for better performance
-            new_width = img.width // subsample
-            new_height = img.height // subsample
-            img = img.resize((new_width, new_height), Image.LANCZOS)
-            images[name] = ImageTk.PhotoImage(img)
-        except Exception as e:
-            logging.error(f"Error loading image {path}: {e}")
-            print(f"Error loading image {path}: {e}")
+                # Check if file exists before loading
+                if not os.path.exists(abs_path):
+                    logging.error(f"Image file not found: {abs_path}")
+                    continue
+                    
+                # Use a more efficient approach for loading images
+                img = Image.open(abs_path)
+                # Resize the image instead of using subsample for better performance
+                new_width = img.width // subsample
+                new_height = img.height // subsample
+                img = img.resize((new_width, new_height), Image.LANCZOS)
+                
+                images[name] = ImageTk.PhotoImage(img)
+            except Exception as e:
+                logging.error(f"Error loading image {abs_path}: {e}")
+                print(f"Error loading image {abs_path}: {e}")
+    except Exception as e:
+        logging.error(f"Error in load_all_images: {e}")
+        print(f"Error in load_all_images: {e}")
+        # Initialize images as empty dict if it doesn't exist
+        images = {}
 
 
 # Move these functions up, after the global declarations and before create_media_controls
@@ -525,6 +553,29 @@ def lock_screen():
     except Exception as e:
         logging.error(f"Error locking screen: {e}")
         print(f"Error locking screen: {e}")
+
+# show/hide the menu when the window is activated
+def on_activate_show_hide():
+    if root.winfo_viewable():
+        root.withdraw()
+    else:
+            root.deiconify()
+
+# toggle the brightness for key "ctrl+alt+b" for [0, 50, 75, 100]
+def toggle_brightness():
+    current_brightness = get_brightness()
+    if current_brightness == 0 or current_brightness < 25:
+        set_brightness(25)
+    elif current_brightness >= 25 and current_brightness < 50:
+        set_brightness(50)
+    elif current_brightness >= 50 and current_brightness < 75:
+        set_brightness(75)
+    elif current_brightness >= 75 and current_brightness < 100:
+        set_brightness(100)
+    elif current_brightness == 100:
+        set_brightness(0)
+    else:
+        set_brightness(35)
 
 def restart_programs():
     try:
@@ -862,6 +913,23 @@ def set_brightness(value):
         return False
 
 
+# listen for shortcuts for brightness
+# ----------------------------------------------------------------------------------
+def listen_for_shortcuts():
+    """
+    Listen for global keyboard shortcuts to adjust brightness.
+    """
+    # kb.add_hotkey("ctrl+alt+b", lambda: toggle_brightness())  # Toggle brightness
+    # kb.add_hotkey("ctrl+alt+m", lambda: on_activate_show_hide())  # show/hide the menu
+    # kb.add_hotkey("ctrl+alt+s", lambda: take_screenshot())  # take screenshot
+    # kb.add_hotkey("ctrl+alt+c", lambda: open_calculator())  # open calculator
+    # kb.add_hotkey("ctrl+alt+h", lambda: open_homepage())  # open homepage
+    # kb.add_hotkey("ctrl+alt+r", lambda: restart_programs())  # restart programs
+    
+    # kb.wait()  # Wait indefinitely for shortcuts
+    pass
+
+
 # create menu controls
 # ----------------------------------------------------------------------------------
 def create_menu_controls(parent):
@@ -898,30 +966,34 @@ def create_menu_controls(parent):
     # Function to get brightness icon and next level
     def get_brightness_info():
         current_brightness = get_brightness()
-        if current_brightness == 0:
+        if current_brightness == 0 or current_brightness < 25:
             return 'brightness0', "Brightness-25"
-        elif current_brightness <= 25:
+        elif current_brightness >= 25 and current_brightness < 50:
             return 'brightness25', "Brightness-50"
-        elif current_brightness <= 50:
+        elif current_brightness >= 50 and current_brightness < 75:
             return 'brightness50', "Brightness-75"
-        elif current_brightness <= 75:
+        elif current_brightness >= 75 and current_brightness < 100:
             return 'brightness75', "Brightness-100"
-        else:
+        elif current_brightness == 100:
             return 'brightness100', "Brightness-0"
+        else:
+            return 'brightness35', "Brightness-35"
     
     # Function to cycle through brightness levels
     def cycle_brightness():
         current = get_brightness()
-        if current == 0:
+        if current == 0 or current < 25:
             set_brightness(25)
-        elif current <= 25:
+        elif current >= 25 and current < 50:
             set_brightness(50)
-        elif current <= 50:
+        elif current >= 50 and current < 75:
             set_brightness(75)
-        elif current <= 75:
+        elif current >= 75 and current < 100:
             set_brightness(100)
-        else:
+        elif current == 100:
             set_brightness(0)
+        else:
+            set_brightness(35)
         
         # Update the label and icon after changing brightness
         icon_name, label_text = get_brightness_info()
@@ -1111,12 +1183,18 @@ def create_menu_controls(parent):
 # Create page frames
 main_page_frame = tk.Frame(main_container, bg="#222222")
 second_page_frame = tk.Frame(main_container, bg="#222222")
+third_page_frame = tk.Frame(main_container, bg="#222222")  # Add this with other page variables
 
 # create first page
 # ----------------------------------------------------------------------------------
 # Update the create_first_page function
 def create_first_page(parent):
     first_page = tk.Frame(parent, bg="#222222")
+    
+    # Create a context menu for the page
+    context_menu = create_context_menu(first_page)
+    # Bind right-click to show the context menu
+    first_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
     
     # Create and pack top controls (search + media)
     top_controls = create_top_controls(first_page)
@@ -1142,9 +1220,6 @@ position_right = int(screen_width / 2 - window_width / 2)
 root.geometry(f"{window_width}x{window_height}+{position_right}+{position_top}")
 # Update the initial setup to hide the window
 root.withdraw()  # Hide the window initially
-
-
-
 
 
 # Add this after creating the root window and before any UI elements
@@ -1316,6 +1391,7 @@ def create_app_launcher(parent):
     def on_mousewheel(event):
         # Scroll horizontally with the mouse wheel
         canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"  # Prevent event propagation
     
     # Bind mouse wheel to canvas and scrollable frame
     canvas.bind("<MouseWheel>", on_mousewheel)
@@ -1417,226 +1493,546 @@ def create_app_launcher(parent):
     return launcher_frame
 
 
+# swithch window
+# ----------------------------------------------------------------------------------
+def close_window():
+    global selected_window_title
+    if selected_window_title:
+        window = gw.getWindowsWithTitle(selected_window_title)
+        if window:
+            window[0].close()
+        selected_window_title = None  # Clear the selection after closing
+
+def minimize_window():
+    global selected_window_title
+    if selected_window_title:
+        window = gw.getWindowsWithTitle(selected_window_title)
+        if window:
+            window[0].minimize()
+
+def maximize_window():
+    global selected_window_title
+    if selected_window_title:
+        window = gw.getWindowsWithTitle(selected_window_title)
+        if window:
+            window[0].maximize()
+
+def restart_window():
+    global selected_window_title
+    if selected_window_title:
+        window = gw.getWindowsWithTitle(selected_window_title)
+        if window:
+            try:
+                # Use psutil to find the process with the matching window title
+                import psutil
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    try:
+                        if selected_window_title.lower() in proc.info['name'].lower():
+                            executable_path = proc.info['exe']
+                            # Close the window
+                            window[0].close()
+                            # Restart the application
+                            subprocess.Popen(executable_path)
+                            break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+            except Exception as e:
+                print(f"Error restarting window: {e}")
+
+
+def list_open_windows_window():
+    global selected_window_title
+    
+    # Check if window list is already open
+    for widget in root.winfo_children():
+        if isinstance(widget, tk.Toplevel) and hasattr(widget, 'windows_list_window'):
+            return  # Window list already open
+    
+    def refresh_window_list():
+        global selected_window_title
+        windows = gw.getAllTitles()
+        
+        # Save current scroll position and selection
+        current_scroll_pos = window_list.yview()[0]
+        current_selection = None
+        if window_list.curselection():
+            current_selection = window_list.get(window_list.curselection())
+        
+        window_list.delete(0, tk.END)  # Clear the listbox
+        
+        # Get search term and handle placeholder text
+        search_text = search_var.get()
+        if search_text == 'Search window name here...':
+            search_term = ''  # Ignore the placeholder text
+        else:
+            search_term = search_text.lower().strip()
+            
+        # Filter and sort the window titles
+        filtered_windows = []
+        for window in windows:
+            if window.strip() and window not in ["Windows Input Experience", "Realtek Audio Console", "Program Manager", "Widgets", "PopupHost"]:
+                if search_term == '' or search_term in window.lower():
+                    filtered_windows.append(window)
+        
+        # Sort the filtered windows
+        filtered_windows.sort()
+        
+        # Add filtered windows to listbox
+        selection_index = None
+        for i, window in enumerate(filtered_windows):
+            window_list.insert(tk.END, window)
+            # Track index of previously selected window or current selection
+            if window == selected_window_title or window == current_selection:
+                selection_index = i
+                
+        # Restore selection if found
+        if selection_index is not None:
+            window_list.selection_clear(0, tk.END)
+            window_list.selection_set(selection_index)
+            
+            # Only scroll to make selection visible if it's not already in view
+            visible_range = window_list.yview()
+            item_position = selection_index / window_list.size()
+            
+            # Check if the selected item is already visible in the current view
+            if item_position < visible_range[0] or item_position > visible_range[1]:
+                # Only then make it visible, but don't center it
+                window_list.see(selection_index)
+            else:
+                # If already visible, maintain the current scroll position
+                window_list.yview_moveto(current_scroll_pos)
+        else:
+            # Restore scroll position if no selection to focus on
+            window_list.yview_moveto(current_scroll_pos)
+                
+        # Schedule the function to run again after 1000 milliseconds (1 second)
+        windows_dialog.after(1000, refresh_window_list)
+
+    def activate_window(event):
+        global selected_window_title
+        try:
+            # Only proceed if there's a selection
+            if window_list.curselection():
+                selected_window_title = window_list.get(window_list.curselection())
+                window = gw.getWindowsWithTitle(selected_window_title)
+                if window:
+                    # Restore the window if it's minimized
+                    if window[0].isMinimized:
+                        window[0].restore()
+                    # Activate the window
+                    window[0].activate()
+        except Exception as e:
+            print(f"Error activating window: {e}")
+    
+    def show_context_menu(event):
+        global selected_window_title
+        try:
+            # Prevent the main menu from disappearing by grabbing and releasing focus
+            root.grab_set()
+            root.grab_release()
+
+            
+            # Select the item under the cursor
+            window_list.selection_clear(0, tk.END)
+            index = window_list.nearest(event.y)
+            window_list.selection_set(index)
+            selected_window_title = window_list.get(index)
+            context_menu.post(event.x_root, event.y_root)
+        except tk.TclError:
+            pass  # Handle the case where no item is under the cursor
+
+    def on_entry_click(event):
+        """Function that gets called whenever entry is clicked"""
+        if search_var.get() == 'Search window name here...':
+            search_entry.delete(0, "end")  # delete all the text in the entry
+            search_entry.insert(0, '')  # Insert blank for user input
+            search_entry.config(fg='white')
+
+    def on_focusout(event):
+        """Function that gets called whenever entry loses focus"""
+        if search_var.get() == '':
+            search_entry.delete(0, "end")
+            search_entry.insert(0, 'Search window name here...')
+            search_entry.config(fg='grey')
+    
+    def on_search_change(*args):
+        refresh_window_list()
+    
+    # Find the list_open_windows_widget button to position the window below it
+    list_open_windows_widget = None
+    
+    def find_button(parent):
+        """Recursively search for the List Open Windows button"""
+        nonlocal list_open_windows_widget
+        if list_open_windows_widget:
+            return
+            
+        for widget in parent.winfo_children():
+            if isinstance(widget, tk.Button) and widget.cget('text') == "List Open Windows":
+                list_open_windows_widget = widget
+                return
+            if hasattr(widget, 'winfo_children'):
+                find_button(widget)
+    
+    # Start the recursive search from root
+    find_button(root)
+    
+    if not list_open_windows_widget:
+        # Fallback to creating a regular window if button not found
+        windows_dialog = tk.Tk()
+        windows_dialog.title("Open Windows")
+        windows_dialog.geometry("500x300")
+    else:
+        # Create a new toplevel window
+        windows_dialog = tk.Toplevel(root)
+        windows_dialog.windows_list_window = True  # Mark as windows list window
+        windows_dialog.title("Open Windows")
+        windows_dialog.overrideredirect(True)  # Remove window decorations
+        
+        # Calculate position to show below the button
+        x = list_open_windows_widget.winfo_rootx() - 150  # Center horizontally with the button
+        y = list_open_windows_widget.winfo_rooty() + list_open_windows_widget.winfo_height() + 5  # Position below with 5px gap
+        
+        # Ensure window stays within screen bounds
+        screen_height = root.winfo_screenheight()
+        if y + 300 > screen_height:  # If window would go off screen bottom
+            y = list_open_windows_widget.winfo_rooty() - 300 - 5  # Show above instead
+        
+        windows_dialog.geometry(f"500x300+{x}+{y}")
+    
+    windows_dialog.configure(bg="#222222")  # Set dark background color
+    windows_dialog.attributes('-topmost', True)
+
+    # Create a frame to hold the search bar, refresh button, listbox, and scrollbar
+    frame = tk.Frame(windows_dialog, bg="#222222")
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # Create a search bar
+    search_var = tk.StringVar()
+    search_entry = tk.Entry(frame, textvariable=search_var, fg='grey', bg="#333333", insertbackground='white')
+    search_entry.insert(0, 'Search window name here...')  # Set initial placeholder text
+    search_entry.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+    search_entry.bind('<FocusIn>', on_entry_click)
+    search_entry.bind('<FocusOut>', on_focusout)
+    
+    # Make the search variable trigger refresh when it changes
+    search_var.trace_add("write", on_search_change)
+
+    # Create a button to refresh the list of open windows
+    refresh_button = tk.Button(frame, text="Refresh", command=refresh_window_list, bg="#333333", fg="#ffffff", activebackground="#4e4e4e")
+    refresh_button.grid(row=0, column=1, padx=5, pady=5)
+    
+    # Create a listbox to display the open windows
+    window_list = tk.Listbox(frame, bg="#333333", fg="#ffffff", selectbackground="#4e4e4e", selectforeground="#ffffff", font=("Arial", 10))
+    window_list.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+    window_list.bind('<Double-Button-1>', activate_window)  # double click to activate window
+    window_list.bind('<<ListboxSelect>>', activate_window)  # click to activate window
+    window_list.bind('<Button-3>', show_context_menu)  # Right-click
+    
+    # Add mousewheel binding to prevent event propagation
+    def on_mousewheel(event):
+        # Scroll the listbox
+        if event.delta > 0:
+            window_list.yview_scroll(-2, "units")
+        else:
+            window_list.yview_scroll(2, "units")
+        # Stop event propagation
+        return "break"
+    
+    # Bind mousewheel events for Windows
+    window_list.bind("<MouseWheel>", on_mousewheel)
+    # Bind mousewheel events for Linux
+    window_list.bind("<Button-4>", on_mousewheel)
+    window_list.bind("<Button-5>", on_mousewheel)
+    
+    # Prevent event propagation for the entire dialog
+    windows_dialog.bind("<MouseWheel>", lambda e: "break")
+    windows_dialog.bind("<Button-4>", lambda e: "break")
+    windows_dialog.bind("<Button-5>", lambda e: "break")
+    
+    # Create a ttk scrollbar and attach it to the listbox
+    style = ttk.Style()
+    style.theme_use('clam')  # Use 'clam' theme for better customization
+    style.configure("Vertical.TScrollbar", background="#333333", troughcolor="#222222", bordercolor="#222222", arrowcolor="#ffffff")
+    
+    # Create a scrollbar for the listbox
+    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=window_list.yview)
+    scrollbar.grid(row=1, column=2, sticky="ns", pady=5)
+    window_list.config(yscrollcommand=scrollbar.set)
+    
+    # Create a context menu for the listbox
+    context_menu = tk.Menu(window_list, tearoff=0, bg="#333333", fg="#ffffff")
+    context_menu.add_command(label="Minimize", command=minimize_window)
+    context_menu.add_command(label="Maximize", command=maximize_window)
+    context_menu.add_command(label="Close", command=close_window)
+    context_menu.add_command(label="Restart", command=restart_window)
+    
+    # Bind right-click to show the context menu
+    window_list.bind("<Button-3>", show_context_menu)
+    
+    # Configure grid weights for resizing
+    frame.grid_rowconfigure(1, weight=1)
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_columnconfigure(1, weight=0)
+    
+    # Add close button
+    close_btn = tk.Button(frame, text="Close",
+                        command=windows_dialog.destroy,
+                        bg="#333333", fg="white",
+                        activebackground="#444444",
+                        activeforeground="white")
+    close_btn.grid(row=2, column=0, columnspan=2, pady=5)
+    
+    # Use a more efficient approach for tracking mouse position
+    def check_mouse_position():
+        if not windows_dialog.winfo_exists():
+            return
+        
+        mouse_x = windows_dialog.winfo_pointerx()
+        mouse_y = windows_dialog.winfo_pointery()
+        
+        # Check if mouse is over windows dialog
+        win_x = windows_dialog.winfo_x()
+        win_y = windows_dialog.winfo_y()
+        win_width = windows_dialog.winfo_width()
+        win_height = windows_dialog.winfo_height()
+        
+        # Check if mouse is over the button
+        if list_open_windows_widget:
+            btn_x = list_open_windows_widget.winfo_rootx()
+            btn_y = list_open_windows_widget.winfo_rooty()
+            btn_width = list_open_windows_widget.winfo_width()
+            btn_height = list_open_windows_widget.winfo_height()
+            
+            # If mouse is over either windows dialog or button, keep open
+            if ((win_x <= mouse_x <= win_x + win_width and 
+                win_y <= mouse_y <= win_y + win_height) or
+                (btn_x <= mouse_x <= btn_x + btn_width and 
+                btn_y <= mouse_y <= btn_y + btn_height)):
+                windows_dialog.after(200, check_mouse_position)  # Check less frequently
+            else:
+                windows_dialog.destroy()
+        else:
+            # If button not found, just check if mouse is over dialog
+            if (win_x <= mouse_x <= win_x + win_width and 
+                win_y <= mouse_y <= win_y + win_height):
+                windows_dialog.after(200, check_mouse_position)
+            else:
+                windows_dialog.destroy()
+    
+    # Start checking mouse position
+    windows_dialog.after(200, check_mouse_position)
+    
+    # Populate the listbox with open windows initially and set up auto-refresh
+    refresh_window_list()
+
+
+
+
 # keyboard shortcuts
 # ----------------------------------------------------------------------------------
 # Load saved shortcuts from config
-shortcuts_file = os.path.join(app_dir, "shortcuts.json")
-shortcuts = default_shortcuts.copy()
+SHORTCUTS_FILE = os.path.join(app_dir, "shortcuts.json")
 
 def load_shortcuts():
-    """Load keyboard shortcuts from file"""
-    global shortcuts
+    """
+    Load shortcuts from the JSON file.
+    """
     try:
-        if os.path.exists(shortcuts_file):
-            with open(shortcuts_file, "r") as f:
-                saved_shortcuts = json.load(f)
-                shortcuts.update(saved_shortcuts)
-    except Exception as e:
+        with open(SHORTCUTS_FILE, 'r') as file:
+            shortcuts = json.load(file)
+            # Ensure all keys are present
+            for key, value in DEFAULT_SHORTCUTS.items():
+                shortcuts.setdefault(key, value)
+            return shortcuts
+    except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
+        # Return default shortcuts if file not found or JSON is invalid
         logging.error(f"Error loading shortcuts: {e}")
         print(f"Error loading shortcuts: {e}")
-        shortcuts = default_shortcuts.copy()
+        return DEFAULT_SHORTCUTS.copy()
 
-def save_shortcuts():
-    """Save keyboard shortcuts to file"""
+def save_shortcuts(shortcuts):
+    """
+    Save shortcuts to the JSON file.
+    """
     try:
-        with open(shortcuts_file, "w") as f:
-            json.dump(shortcuts, f, indent=4)
+        with open(SHORTCUTS_FILE, 'w') as file:
+            json.dump(shortcuts, file, indent=4)
     except Exception as e:
         logging.error(f"Error saving shortcuts: {e}")
         print(f"Error saving shortcuts: {e}")
 
-def create_shortcuts_manager(parent):
-    """Create a keyboard shortcuts manager"""
-    shortcuts_frame = tk.Frame(parent, bg="#222222")
+def register_hotkeys(shortcuts):
+    """
+    Register global keyboard shortcuts.
+    """
+    actions = {
+        "Show Hide Menu": on_activate_show_hide,
+        "Take Screenshot": take_screenshot,
+        "Open Calculator": open_calculator,
+        "Open Homepage": open_homepage,
+        "Restart Programs": restart_programs,
+        "Toggle Brightness": toggle_brightness,
+        
+        # update the open_shortcut_editor function -> events and event_keys to use the new shortcuts
+    }
+    try:
+        for key, action in actions.items():
+            kb.add_hotkey(shortcuts[key], action)
+        return True
+    except Exception as e:
+        logging.error(f"Error registering hotkey: {e}")
+        show_notification(APP_NAME, f"Error registering hotkey: {e}")
+        print(f"Error registering hotkey: {e}")
+        return False
+
+def listen_for_shortcuts():
+    """
+    Listen for global keyboard shortcuts to adjust brightness.
+    """
+    shortcuts = load_shortcuts()
+    register_hotkeys(shortcuts)
     
-    def open_shortcuts_manager():
-        manager_window = tk.Toplevel(root)
-        manager_window.title("Keyboard Shortcuts")
-        manager_window.minsize(400, 300)
-        manager_window.configure(bg="#222222")
-        manager_window.iconbitmap(ICON_PATHH)
+    # Add a watchdog timer to periodically refresh shortcuts
+    def refresh_shortcuts():
+        try:
+            kb.clear_all_hotkeys()
+            register_hotkeys(shortcuts)
+            root.after(3600000, refresh_shortcuts)  # Refresh every hour (3600000 ms)
+        except Exception as e:
+            logging.error(f"Error refreshing shortcuts: {e}")
+            show_notification(APP_NAME, f"Error refreshing shortcuts: {e}")
+            print(f"Error refreshing shortcuts: {e}")
+            # Try again after a shorter interval if there was an error
+            root.after(60000, refresh_shortcuts)  # Try again after 1 minute
+    
+    # Start the watchdog timer
+    root.after(3600000, refresh_shortcuts)  # First refresh after 1 hour
+    
+    kb.wait()
+
+def open_shortcut_editor():
+    """
+    Open a dialog to edit keyboard shortcuts.
+    """
+    
+    def edit_shortcut():
+        # Get the selected action
+        selected_index = event_listbox.curselection()
+        if not selected_index:
+            return
+
+        action_name = events[selected_index[0]]
+        current_key = keys[selected_index[0]]
+
+        def save_shortcut():
+            # Save the updated shortcut
+            new_key = shortcut_entry.get()
+            keys[selected_index[0]] = new_key
+            shortcut_listbox.delete(selected_index[0])
+            shortcut_listbox.insert(selected_index[0], new_key)
+            save_shortcuts(dict(zip(event_keys, keys)))
+            edit_window.destroy()
+            logging.info("Shortcut updated.")
+            show_notification(APP_NAME, "Shortcut updated.")
+            print("Shortcut updated.")
+            reload_shortcuts()
+
+        # Create a new window for editing the selected shortcut
+        edit_window = tk.Toplevel(editor_window)
+        edit_window.title("Edit Shortcut")
+        edit_window.geometry("300x150")
+        edit_window.minsize(300, 150)
+        edit_window.configure(bg="#333333")
+        edit_window.iconbitmap(ICON_PATHH)
         # Get screen dimensions and position the window at the center
-        screen_width = manager_window.winfo_screenwidth()
-        screen_height = manager_window.winfo_screenheight()
-        window_width, window_height = 400, 300  # Same as geometry
+        screen_width = edit_window.winfo_screenwidth()
+        screen_height = edit_window.winfo_screenheight()
+        window_width, window_height = 300, 150  # Same as geometry
         position_x = (screen_width // 2) - (window_width // 2)
         position_y = (screen_height // 2) - (window_height // 2)
-        manager_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
-        
-        # Create listbox for shortcuts
-        listbox_frame = tk.Frame(manager_window, bg="#222222")
-        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Create two columns: Action and Shortcut
-        action_list = tk.Listbox(listbox_frame, bg="#333333", fg="white",
-                               font=("Arial", 11), selectbackground="#555555",
-                               width=25)
-        action_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        shortcut_list = tk.Listbox(listbox_frame, bg="#333333", fg="white",
-                                 font=("Arial", 11), selectbackground="#555555",
-                                 width=15)
-        shortcut_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
-        # Synchronize scrolling between lists
-        def on_scroll(*args):
-            action_list.yview_moveto(args[0])
-            shortcut_list.yview_moveto(args[0])
-        
-        scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL,
-                               command=on_scroll)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        action_list.config(yscrollcommand=scrollbar.set)
-        shortcut_list.config(yscrollcommand=scrollbar.set)
-        
-        # Add shortcuts to lists
-        for action, shortcut in shortcuts.items():
-            action_list.insert(tk.END, action)
-            shortcut_list.insert(tk.END, shortcut)
-        
-        def edit_shortcut():
-            selection = action_list.curselection()
-            if not selection:
-                return
-                
-            action = action_list.get(selection[0])
-            old_shortcut = shortcuts[action]
-            
-            # Create edit dialog
-            edit_window = tk.Toplevel(manager_window)
-            edit_window.title("Edit Shortcut")
-            edit_window.minsize(300, 150)
-            edit_window.configure(bg="#222222")
-            edit_window.iconbitmap(ICON_PATHH)
-            # Get screen dimensions and position the window at the center
-            screen_width = edit_window.winfo_screenwidth()
-            screen_height = edit_window.winfo_screenheight()
-            window_width, window_height = 300, 150  # Same as geometry
-            position_x = (screen_width // 2) - (window_width // 2)
-            position_y = (screen_height // 2) - (window_height // 2)
-            edit_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
-            
-            tk.Label(edit_window, text=f"Action: {action}",
-                    bg="#222222", fg="white").pack(pady=10)
-            
-            shortcut_var = tk.StringVar(value=old_shortcut)
-            shortcut_entry = tk.Entry(edit_window, textvariable=shortcut_var,
-                                    bg="#333333", fg="white", width=20)
-            shortcut_entry.pack(pady=5)
-            
-            def on_key(event):
-                key_name = event.keysym
-                if key_name in ['Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Shift_L', 'Shift_R']:
-                    return
-                
-                modifiers = []
-                if event.state & 0x4:
-                    modifiers.append("ctrl")
-                if event.state & 0x8:
-                    modifiers.append("alt")
-                if event.state & 0x1:
-                    modifiers.append("shift")
-                
-                shortcut = "+".join(modifiers + [key_name.lower()])
-                shortcut_var.set(f"<{shortcut}>")
-                return "break"
-            
-            shortcut_entry.bind("<Key>", on_key)
-            
-            def save_edit():
-                try:
-                    new_shortcut = shortcut_var.get()  # Use get() to retrieve the value
-                    if new_shortcut:
-                        shortcuts[action] = new_shortcut
-                        save_config()  # Save the updated shortcuts to config
-                        edit_window.destroy()
-                        show_notification(APP_NAME, f"Shortcut for {action} updated.")
-                except Exception as e:
-                    logging.error(f"Error saving shortcut: {e}")
-                    show_notification(APP_NAME, "Failed to update shortcut.")
-            
-            def cancel_edit():
-                edit_window.destroy()
-            
-            btn_frame = tk.Frame(edit_window, bg="#222222")
-            btn_frame.pack(pady=20)
-            
-            tk.Button(btn_frame, text="Save", command=save_edit,
-                     bg="#444444", fg="white").pack(side=tk.LEFT, padx=5)
-            tk.Button(btn_frame, text="Cancel", command=cancel_edit,
-                     bg="#444444", fg="white").pack(side=tk.LEFT, padx=5)
-        
-        def reset_shortcuts():
-            if messagebox.askyesno("Reset Shortcuts", 
-                                 "Reset all shortcuts to default values?"):
-                global shortcuts
-                shortcuts = default_shortcuts.copy()
-                save_shortcuts()
-                
-                # Update lists
-                action_list.delete(0, tk.END)
-                shortcut_list.delete(0, tk.END)
-                for action, shortcut in shortcuts.items():
-                    action_list.insert(tk.END, action)
-                    shortcut_list.insert(tk.END, shortcut)
-                
-                setup_keyboard_shortcuts()  # Refresh keyboard listeners
-                show_notification(APP_NAME, "Shortcuts reset to default")
-                logging.info("Shortcuts reset to default")
-                print("Shortcuts reset to default")
-        
-        # Control buttons
-        control_frame = tk.Frame(manager_window, bg="#222222")
-        control_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        edit_btn = tk.Button(control_frame, text="Edit", command=edit_shortcut,
-                           bg="#444444", fg="white", width=8)
-        edit_btn.pack(side=tk.LEFT, padx=5)
-        
-        reset_btn = tk.Button(control_frame, text="Reset", command=reset_shortcuts,
-                            bg="#444444", fg="white", width=8)
-        reset_btn.pack(side=tk.LEFT, padx=5)
-    
-    shortcuts_btn = tk.Button(shortcuts_frame, text="Shortcuts",
-                            command=open_shortcuts_manager,
-                            bg="#333333", fg="#d2d2d2",
-                            activebackground="#444444")
-    shortcuts_btn.pack()
-    
-    return shortcuts_frame
+        edit_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
 
-def setup_keyboard_shortcuts():
-    """Setup keyboard shortcuts listeners"""
-    global keyboard_listener
-    
-    if keyboard_listener:
-        keyboard_listener.stop()
-    
-    def on_activate_show_hide():
-        if root.winfo_viewable():
-            root.withdraw()
-        else:
-            root.deiconify()
-    
-    def for_canonical(f):
-        return lambda k: f(keyboard.canonical(k))
-    
-    # Create hotkey mapping
-    hotkeys = {
-        shortcuts["Show/Hide Menu"]: on_activate_show_hide,
-        shortcuts["Take Screenshot"]: take_screenshot,
-        shortcuts["Open Calculator"]: open_calculator,
-        shortcuts["Open Homepage"]: open_homepage,
-        shortcuts["Restart Programs"]: restart_programs
-    }
-    
-    keyboard_listener = keyboard.GlobalHotKeys(hotkeys)
-    keyboard_listener.start()
+        tk.Label(edit_window, text=f"Action: {action_name}", bg="#333333", fg="white").pack(pady=5)
+        shortcut_entry = tk.Entry(edit_window, bg="#222222", fg="white")
+        # change the text cursor color to white
+        shortcut_entry.config(insertbackground="white")
+        shortcut_entry.insert(0, current_key)
+        shortcut_entry.pack(pady=5)
 
-# Load shortcuts and setup listeners
-load_shortcuts()
-setup_keyboard_shortcuts()
+        tk.Button(edit_window, text="Save", command=save_shortcut, bg="#222222", fg="white").pack(side=tk.LEFT, padx=10, pady=10)
+        tk.Button(edit_window, text="Cancel", command=edit_window.destroy, bg="#222222", fg="white").pack(side=tk.RIGHT, padx=10, pady=10)
+
+    def reset_to_defaults():
+        """
+        Reset shortcuts to default values
+        """
+        save_shortcuts(DEFAULT_SHORTCUTS)
+        for i, key in enumerate(DEFAULT_SHORTCUTS.values()):
+            shortcut_listbox.delete(i)
+            shortcut_listbox.insert(i, key)
+        reload_shortcuts()
+        logging.info("Shortcuts reset to default. Restart the app to apply changes.")
+        show_notification(APP_NAME, "Shortcuts reset to default. Restart the app to apply changes.")
+        print("Shortcuts reset to default. Restart the app to apply changes.")
+
+    def reload_shortcuts():
+        """
+        Reload shortcuts and re-register hotkeys.
+        """
+        shortcuts = load_shortcuts()
+        kb.clear_all_hotkeys()
+        register_hotkeys(shortcuts)
+
+    # Create a new window for editing shortcuts
+    editor_window = tk.Toplevel(root)
+    editor_window.title("Keyboard Shortcuts")
+    editor_window.geometry("400x300")
+    editor_window.minsize(400, 300)
+    editor_window.configure(bg="#333333")
+    editor_window.iconbitmap(ICON_PATHH)
+    # Get screen dimensions and position the window at the center
+    screen_width = editor_window.winfo_screenwidth()
+    screen_height = editor_window.winfo_screenheight()
+    window_width, window_height = 400, 300  # Same as geometry
+    position_x = (screen_width // 2) - (window_width // 2)
+    position_y = (screen_height // 2) - (window_height // 2)
+    editor_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Load current shortcuts
+    shortcuts = load_shortcuts()
+
+    # Create a frame for the listboxes
+    frame = tk.Frame(editor_window, bg="#333333")
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # Configure grid weights for responsiveness
+    frame.grid_rowconfigure(0, weight=1)
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_columnconfigure(1, weight=1)
+
+    # Create listboxes for event names and shortcuts
+    event_listbox = tk.Listbox(frame, width=20, height=5, bg="#222222", fg="white")
+    shortcut_listbox = tk.Listbox(frame, width=20, height=5, bg="#222222", fg="white")
+
+    # Insert event names and shortcuts into listboxes
+    events = ["Show Hide Menu", "Take Screenshot", "Open Calculator", "Open Homepage", "Restart Programs", "Toggle Brightness"]
+    event_keys = ["Show Hide Menu", "Take Screenshot", "Open Calculator", "Open Homepage", "Restart Programs", "Toggle Brightness"]
+    # ["on_activate_show_hide", "take_screenshot", "open_calculator", "open_homepage", "restart_programs", "toggle_brightness"]
+    keys = [shortcuts[key] for key in event_keys]
+
+    for event, key in zip(events, keys):
+        event_listbox.insert(tk.END, event)
+        shortcut_listbox.insert(tk.END, key)
+
+    event_listbox.grid(row=0, column=0, sticky="nsew")
+    shortcut_listbox.grid(row=0, column=1, sticky="nsew")
+
+    # Add edit and reset buttons
+    button_frame = tk.Frame(editor_window, bg="#333333")
+    button_frame.pack(fill=tk.X, padx=10, pady=5)
+    tk.Button(button_frame, text="Edit", command=edit_shortcut, bg="#222222", fg="white").pack(side=tk.LEFT, padx=5)
+    tk.Button(button_frame, text="Reset to Default", command=reset_to_defaults, bg="#222222", fg="white").pack(side=tk.RIGHT, padx=5)
 
 
 # Then keep create_timer_widget and create_bookmarks_widget definitions
@@ -2052,11 +2448,30 @@ def create_bookmarks_widget(parent):
             buttons_frame.update_idletasks()
             canvas.config(scrollregion=canvas.bbox("all"))
             
-            # Add mousewheel scrolling
+            # Add mousewheel handler to prevent event propagation
             def on_mousewheel(event):
-                canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+                # Scroll the canvas
+                if event.delta > 0:
+                    canvas.xview_scroll(-2, "units")
+                else:
+                    canvas.xview_scroll(2, "units")
+                # Stop event propagation
+                return "break"
             
-            canvas.bind_all("<MouseWheel>", on_mousewheel)
+            # Bind mousewheel events for Windows
+            canvas.bind("<MouseWheel>", on_mousewheel)
+            buttons_frame.bind("<MouseWheel>", on_mousewheel)
+            # Bind mousewheel events for Linux
+            canvas.bind("<Button-4>", on_mousewheel)
+            canvas.bind("<Button-5>", on_mousewheel)
+            buttons_frame.bind("<Button-4>", on_mousewheel)
+            buttons_frame.bind("<Button-5>", on_mousewheel)
+            
+            # For each button, also bind the mousewheel event
+            for child in buttons_frame.winfo_children():
+                child.bind("<MouseWheel>", on_mousewheel)
+                child.bind("<Button-4>", on_mousewheel)
+                child.bind("<Button-5>", on_mousewheel)
         else:
             # For fewer bookmarks, just add them directly
             for name, url in bookmarks.items():
@@ -2086,8 +2501,39 @@ def create_bookmarks_widget(parent):
 
 # Then keep create_second_page function
 # ----------------------------------------------------------------------------------
+def show_context_menu(event, context_menu):
+    try:
+        # Prevent the main menu from disappearing by grabbing and releasing focus
+        root.grab_set()
+        root.grab_release()
+        root.deiconify()
+        check_mouse_position()
+        
+        # Post the context menu at the cursor position
+        context_menu.post(event.x_root, event.y_root)
+    except tk.TclError:
+        pass  # Handle any errors
+
+def create_context_menu(parent):
+    """Create a context menu with common actions"""
+    context_menu = tk.Menu(parent, tearoff=0, bg="#333333", fg="#ffffff")
+    context_menu.add_command(label="Toggle Brightness", command=toggle_brightness)
+    context_menu.add_command(label="Hide Menu", command=on_activate_show_hide)
+    context_menu.add_command(label="Restart", command=restart_programs)
+    context_menu.add_command(label="Terminate", command=close_menu)
+    
+    # Add a handler for when the menu is unposted (closed)
+    context_menu.bind("<Unmap>", lambda e: root.after(10, root.deiconify))
+    
+    return context_menu
+
 def create_second_page(parent):
     second_page = tk.Frame(parent, bg="#222222")
+    
+    # Create a context menu for the page
+    context_menu = create_context_menu(second_page)
+    # Bind right-click to show the context menu
+    second_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
     
     # app launcher
     app_launcher_widget = create_app_launcher(second_page)
@@ -2098,9 +2544,27 @@ def create_second_page(parent):
     tools_frame = tk.Frame(second_page, bg="#222222")
     tools_frame.pack(pady=10)
     
+    # list open windows
+    list_open_windows_widget = tk.Button(tools_frame, text="List Open Windows", command=list_open_windows_window, 
+                        bg="#333333", 
+                        fg="#d2d2d2",
+                        activebackground="#444444",
+                        activeforeground="white")
+    list_open_windows_widget.pack(side=tk.LEFT, padx=5)
+    
     # Shortcuts Manager
-    shortcuts_widget = create_shortcuts_manager(tools_frame)
-    shortcuts_widget.pack(side=tk.LEFT, padx=5)
+    # shortcuts_widget = create_shortcuts_manager(tools_frame)
+    # shortcuts_widget.pack(side=tk.LEFT, padx=5)
+    
+    # Edit Shortcuts
+    edit_shortcuts_button = tk.Button(tools_frame, text="Edit Shortcuts", command=open_shortcut_editor, 
+                        bg="#333333", 
+                        fg="#d2d2d2",
+                        activebackground="#444444",
+                        activeforeground="white")
+    edit_shortcuts_button.pack(side=tk.LEFT, padx=5)
+    
+    
     
     # Timer/Stopwatch
     timer_widget = create_timer_widget(tools_frame)
@@ -2122,6 +2586,11 @@ def create_second_page(parent):
 def create_third_page(parent):
     """Create the third page with 'Coming Soon' message"""
     third_page = tk.Frame(parent, bg="#222222")
+    
+    # Create a context menu for the page
+    context_menu = create_context_menu(third_page)
+    # Bind right-click to show the context menu
+    third_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
     
     # Create a container for the message
     message_frame = tk.Frame(third_page, bg="#222222")
@@ -2894,14 +3363,14 @@ def create_system_tray():
 
     def on_exit(icon, item):
         try:
-            logging.info(f"Stopping system tray")
-            show_notification(APP_NAME, "Stopping system tray")
-            print(f"Stopping system tray")
+            logging.info(f"Closing application...")
+            show_notification(APP_NAME, "Closing application...")
+            print(f"Closing application...")
             icon.stop()
             root.quit()
         except Exception as e:
-            logging.error(f"Error stopping system tray: {e}")
-            print(f"Error stopping system tray: {e}")
+            logging.error(f"Error closing application: {e}")
+            print(f"Error closing application: {e}")
     
     # function to restart application 
     def on_restart(icon, item):
@@ -3090,6 +3559,10 @@ if __name__ == "__main__":
         else:
             logging.error("update_system_stats function not found")
             print("update_system_stats function not found")
+        
+        # Run the shortcut listener in a separate thread
+        shortcut_thread = threading.Thread(target=listen_for_shortcuts, daemon=True)
+        shortcut_thread.start()
         
         # Start the main loop
         root.mainloop()
