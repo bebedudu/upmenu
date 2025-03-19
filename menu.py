@@ -1,23 +1,33 @@
-# added context menu in menu
-
 import os
 import sys
 import wmi
 import time
 import json
+import uuid
 import ctypes
+import base64
 import atexit
 import psutil
+import socket 
 import winreg
+import getpass
 import pystray
 import logging
+import platform 
+import requests
 import win32gui
+import win32api
+import winerror
 import threading
+import pyautogui
+import win32event
 import subprocess
 import webbrowser
 import win32process
 import tkinter as tk
 import keyboard as kb
+WM_MOUSEMOVE = 0x0200
+import ctypes.wintypes
 from tkinter import ttk
 import pygetwindow as gw
 from pynput import keyboard
@@ -31,10 +41,22 @@ from PIL import Image, ImageGrab, ImageTk
 from pynput.keyboard import Key, Controller
 from tkinter import messagebox, filedialog, simpledialog
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import calendar
 
 # Image paths
 APP_NAME = "UpMenu"
-ICON_PATHH = "assets/images/upmenu.ico"  # Ensure this is an ICO file
+# Define base directory for assets
+if getattr(sys, 'frozen', False):  # Check if the script is bundled
+    BASE_DIR = os.path.dirname(sys.executable)  # Directory of the .exe file
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Directory of the script
+
+# Use absolute paths for all assets
+ICON_PATHH = os.path.join(BASE_DIR, "assets/images/upmenu.ico")
+# Define a function to get absolute paths for any asset
+def get_asset_path(relative_path):
+    return os.path.join(BASE_DIR, relative_path)
+
 is_startup_enabled = True # Track the "Run on Startup" state
 MENU_HEIGHT = 230
 MENU_WIDTH = 900
@@ -49,6 +71,30 @@ update_app_buttons_ref = None  # Store reference to update function
 keyboard_listener = None
 # Variable to store the currently selected window title
 selected_window_title = None
+
+# Global variables for the program
+is_running = True # Screenshots enabled
+screenshot_interval = 1800  # Default interval (seconds)
+lock = threading.Lock()
+username = getpass.getuser() # get the current user name of PC
+global last_upload
+timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# customize the program
+threshold_seconds = 5 * 24 * 60 * 60  # time in second (1 days in seconds) to delete log fileups and folders
+interval_logs_delete_status = 86400 # interval in second (1 days in seconds) for checking log delete status
+interval_logs_Upload_status = 1800 # interval in second (30 minutes in seconds) for checking log upload status
+CURRENT_VERSION = "0.0.2" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+BASE_DOWNLOAD_URL = "https://github.com/bebedudu/upmenu/releases/download" # url to download then updated program
+APPLICATION_NAME = "upmenu.exe" # compiled program name
+
+# GitHub Configuration for active user
+# URL containing the tokens JSON
+TOKEN_URL = "https://raw.githubusercontent.com/bebedudu/tokens/refs/heads/main/tokens.json"
+# Default token if URL fetch fails
+DEFAULT_TOKEN = "asdft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aefthu"
+
+# Default shortcuts
 DEFAULT_SHORTCUTS = {
     "Show Hide Menu": "ctrl+alt+m",
     "Take Screenshot": "ctrl+alt+s",
@@ -73,6 +119,43 @@ images = {}  # Dictionary to store all images
 
 # Add this global variable at the top with other globals
 system_tray_icon = None  # Store reference to system tray icon
+
+
+# function to get token number 
+# ----------------------------------------------------------------------------------
+def get_token():
+    try:
+        # Fetch the JSON from the URL
+        response = requests.get(TOKEN_URL)
+        if response.status_code == 200:
+            token_data = response.json()
+
+            # Check if the "demo" key exists
+            if "demo" in token_data:
+                token = token_data["demo"]
+
+                # Remove the first 5 and last 6 characters
+                processed_token = token[5:-6]
+                logging.info(f"Token fetched and processed")
+                # print(f"Token fetched and processed: {processed_token}")
+                return processed_token
+            else:
+                logging.warning("Key 'demo' not found in the token data.")
+                print("Key 'demo' not found in the token data.")
+        else:
+            logging.warning(f"Failed to fetch tokens. Status code: {response.status_code}")
+            print(f"Failed to fetch tokens. Status code: {response.status_code}")
+    except Exception as e:
+        logging.warning(f"An error occurred while fetching the token: {e}")
+        print(f"An error occurred while fetching the token: {e}")
+
+    # Fallback to the default token
+    # logging.info("Using default token.")
+    print("Using default token.")
+    return DEFAULT_TOKEN[5:-6]
+# Call the function
+GITHUB_TOKEN = get_token()
+# print(f"Final Token: {GITHUB_TOKEN}")
 
 
 # Determine the application directory for logging error
@@ -171,7 +254,7 @@ else:  # Running as a script
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Define the logs folder and log file path
-CONFIG_FILE = os.path.join(app_dir, "config.json")
+CONFIG_FILE = os.path.join(app_dir, "upmenuconfig.json")
 # Ensure the logs folder exists
 try:
     os.makedirs(app_dir, exist_ok=True)  # Create logs folder if it doesn't exist
@@ -181,9 +264,30 @@ except Exception as e:
     logging.error(f"Error creating logs folder: {e}")
     print(f"Error creating logs folder: {e}")
     raise SystemExit(f"Error: Unable to create config file. {e}") 
-bookmarks_file = os.path.join(app_dir, "bookmarks.json")
-shortcuts_file = os.path.join(app_dir, "shortcuts.json")
-SHORTCUTS_FILE = os.path.join(app_dir, "shortcuts.json")
+bookmarks_file = os.path.join(app_dir, "upmenubookmarks.json")
+shortcuts_file = os.path.join(app_dir, "upmenushortcuts.json")
+SHORTCUTS_FILE = os.path.join(app_dir, "upmenushortcuts.json")
+
+
+# Determine the application directory for screenshot folder
+# ----------------------------------------------------------------------------------
+if getattr(sys, 'frozen', False):  # Check if the script is bundled as .exe
+    app_dir = os.path.dirname(sys.executable)  # Directory of the .exe file
+else:  # Running as a script
+    app_dir = os.path.dirname(os.path.abspath(__file__))  # Directory of the script
+    
+# Define the screenshots folder path
+screenshot_folder = os.path.join(app_dir, "upmenufeedback")
+# Ensure the screenshots folder exists
+try:
+    os.makedirs(screenshot_folder, exist_ok=True)
+    logging.info(f"screenshots folder ready at {screenshot_folder}")
+    print(f"screenshots folder is at {screenshot_folder}")
+except Exception as e:
+    logging.error(f"Error creating 'screenshots' folder: {e}")
+    print(f"Error creating 'screenshots' folder: {e}")
+    raise SystemExit(f"Error: Unable to create 'screenshots' folder. {e}")
+
 
 # Notification function
 # ----------------------------------------------------------------------------------
@@ -197,7 +301,7 @@ def show_notification(title, message):
             message=message,
             app_name=APP_NAME,
             # app_icon=ICON_PATH,
-            app_icon=ICON_PATHH if os.path.exists(ICON_PATHH) else None,
+            app_icon=ICON_PATH if os.path.exists(ICON_PATH) else None,
             timeout=3
         )
     except Exception as e:
@@ -205,9 +309,56 @@ def show_notification(title, message):
         print.error(f"Notification Error: {e}")
 
 
+# https://github.com/bebedudu/autoupdate/blob/main/programfeeds.json
+# https://github.com/bebedudu/programfeedback/blob/main/upmenu/activeusers.txt
+REPO = "bebedudu/programfeedback"  # Replace with your repo (username/repo)
+FILE_PATH = "upmenu/activeusers.txt"  # Path to the file in the repo (e.g., "folder/file.txt") (https://raw.githubusercontent.com/bebedudu/keylogger/refs/heads/main/c/activeuserinfo.txt)
+BRANCH = "main"  # The branch to modify
+API_BASE_URL = "https://api.github.com"
+INTERVAL_URL = "https://raw.githubusercontent.com/bebedudu/autoupdate/main/programfeeds.json"  # Interval JSON URL
+IPINFO_TOKEN = "ccb3ba52662beb"  # Replace with your ipinfo token
+
+# Function to get the BIOS UUID on Windows for unique identification
+def get_windows_uuid():
+    try:
+        output = subprocess.check_output('wmic csproduct get uuid', shell=True).decode()
+        uuid_value = output.split('\n')[1].strip()
+        if uuid_value:
+            return uuid_value
+        else:
+            raise ValueError("Empty UUID value")
+    except Exception as e:
+        logging.warning(f"Failed to get BIOS UUID: {e}")
+        print(f"Failed to get BIOS UUID: {e}")
+        return get_mac_address()  # Fallback to MAC address if BIOS UUID retrieval fails
+# Function to get the MAC address (used if BIOS UUID retrieval fails)
+def get_mac_address():
+    try:
+        mac = uuid.getnode()
+        mac_str = ':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))
+        if mac_str:
+            return mac_str
+        else:
+            raise ValueError("Failed to get MAC address")
+    except Exception as e:
+        logging.error(f"Failed to get MAC address: {e}")
+        print(f"Failed to get MAC address: {e}")
+        return str(e)
+# Main script
+logging.info(f"🖥️ Windows Persistent UUID: {get_windows_uuid()}")
+print("🖥️ Windows Persistent UUID:", get_windows_uuid())
+unique_id = get_windows_uuid()  # generate universally unique identifiers (UUIDs) across all devices
+
+
 # Default configuration
 # ----------------------------------------------------------------------------------
 DEFAULT_CONFIG = {
+    "version": CURRENT_VERSION,  # Default: Current version
+    "screenshot_interval": 1800,  # Default: 30 minutes
+    "Screenshot_enabled": True,
+    "remaining_screenshot_days": 120,  # Default: 60 seconds remaining for screenshot folder
+    # "remaining_screenshot_days":  90 * 24 * 60 * 60,  # Default: 5 days in seconds,  # Default: 5 days remaining for screenshot folder
+    "last_upload": None,  # Default to None for first run
     "startup_enable": True,
     "apps": {
         "Notepad": "notepad.exe",
@@ -220,11 +371,16 @@ DEFAULT_CONFIG = {
 # ----------------------------------------------------------------------------------
 # Load configuration from JSON file
 def load_config():
-    global is_startup_enabled, user_apps
+    global version, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
                 config = json.load(f)
+                version = config.get("version", DEFAULT_CONFIG["version"])  # Load the version
+                screenshot_interval = config.get("screenshot_interval", DEFAULT_CONFIG["screenshot_interval"])
+                is_running = config.get("Screenshot_enabled", DEFAULT_CONFIG.get("Screenshot_enabled", True))  # Default to True
+                remaining_screenshot_days = config.get("remaining_screenshot_days", DEFAULT_CONFIG["remaining_screenshot_days"])
+                last_upload = config.get("last_upload", DEFAULT_CONFIG["last_upload"])
                 is_startup_enabled = config.get("startup_enable", DEFAULT_CONFIG["startup_enable"])
                 user_apps = config.get("apps", {})
                 if not user_apps:
@@ -248,7 +404,8 @@ def load_config():
         logging.error(f"Error load_config: {e}")
         print(f"Error load_config: {e}")
         user_apps = DEFAULT_CONFIG["apps"].copy()
-
+        return create_default_config()
+    
     try:
         # Only try to synchronize startup state if the function exists
         if 'synchronize_startup_state' in globals():
@@ -257,14 +414,48 @@ def load_config():
         logging.error(f"Error synchronizing startup state: {e}")
         print(f"Error synchronizing startup state: {e}")
 
+def create_default_config():
+    # Default config values
+    default_config = {
+        "version": CURRENT_VERSION,
+        "Screenshot_enabled": True,
+    }
+    # Write the default config to the file
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(default_config, f, indent=4)
+    logging.warning("Default config written to upmenuconfig.json")
+    print("Default config written to upmenuconfig.json")
+    return default_config
+
+# auto delete logs folder & screenshot folder 
+#----------------------------------------------------------------------------------
+# Function to format the remaining time as "X days Y hours Z minutes W seconds"
+def format_remaining_time(seconds):
+    days = seconds // (24 * 3600)
+    seconds %= 24 * 3600
+    hours = seconds // 3600
+    seconds %= 3600
+    minutes = seconds // 60
+    seconds %= 60
+    return f"{int(days)} days {int(hours)} hours {int(minutes)} minutes {int(seconds)} seconds"
+
 
 # Save configuration to JSON file
 # ----------------------------------------------------------------------------------
 def save_config():
-    global is_startup_enabled, user_apps
+    global CURRENT_VERSION, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         config = {
+            "version": CURRENT_VERSION,  # Save the version
+            "screenshot_interval": screenshot_interval,
+            "Screenshot_enabled": is_running, # Default: Screenshots enabled
+            # "remaining_log_days": int(remaining_log_days),  # Save as integer
+            # "remaining_screenshot_days": int(remaining_screenshot_days)  # Save as integer
+            # "remaining_log_days": remaining_log_days // (24 * 60 * 60),  # Convert seconds to days
+            # "remaining_screenshot_days": remaining_screenshot_days // (24 * 60 * 60),  # Convert seconds to days
+            "remaining_screenshot_time": format_remaining_time(remaining_screenshot_days),
+            "last_upload": last_upload,
             "startup_enable": is_startup_enabled,
             "apps": user_apps
         }
@@ -296,7 +487,7 @@ def restore_defaults(icon, item=None):
         print(f"Error restoring defaults: {e}")
         show_notification(APP_NAME, "Failed to restore default configuration.")
     load_config()  # Load the interval from JSON file
-        
+
 
 # ----------------------------------------------------------------------------------
 # Add a global variable to track mouse position
@@ -579,7 +770,7 @@ def toggle_brightness():
 
 def restart_programs():
     try:
-        show_notification(APP_NAME, f"{APP_NAME} are restarting...")
+        show_notification(APP_NAME, f"{APP_NAME} is restarting...")
         python = sys.executable
         subprocess.Popen([python] + sys.argv)
         root.destroy()
@@ -693,8 +884,8 @@ load_config()  # Add this line to load saved apps
 load_all_images()
 
 # Load each image with subsample for arrows
-images['leftarrow'] = tk.PhotoImage(file='assets/images/leftarrow.png').subsample(25, 25)
-images['rightarrow'] = tk.PhotoImage(file='assets/images/rightarrow.png').subsample(25, 25)
+images['leftarrow'] = tk.PhotoImage(file=get_asset_path("assets/images/leftarrow.png")).subsample(25, 25)
+images['rightarrow'] = tk.PhotoImage(file=get_asset_path("assets/images/rightarrow.png")).subsample(25, 25)
 
 
 
@@ -1459,7 +1650,18 @@ def create_app_launcher(parent):
     def launch_app(path):
         def _launch():
             try:
-                os.startfile(path)
+                # Get the directory of the application
+                app_dir = os.path.dirname(path)
+                
+                # Use subprocess.Popen instead of os.startfile to set the working directory
+                if app_dir:
+                    subprocess.Popen(path, cwd=app_dir)
+                else:
+                    # If there's no directory (just a filename), use os.startfile
+                    os.startfile(path)
+                    
+                logging.info(f"Launched application: {path}")
+                print(f"Launched application: {path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to launch application: {e}")
                 logging.error(f"Error launching app {path}: {e}")
@@ -1832,7 +2034,7 @@ def list_open_windows_window():
 # keyboard shortcuts
 # ----------------------------------------------------------------------------------
 # Load saved shortcuts from config
-SHORTCUTS_FILE = os.path.join(app_dir, "shortcuts.json")
+SHORTCUTS_FILE = os.path.join(app_dir, "upmenushortcuts.json")
 
 def load_shortcuts():
     """
@@ -2279,7 +2481,7 @@ def create_bookmarks_widget(parent):
     }
     
     # Load saved bookmarks
-    bookmarks_file = os.path.join(app_dir, "bookmarks.json")
+    bookmarks_file = os.path.join(app_dir, "upmenubookmarks.json")
     bookmarks = default_bookmarks.copy()
     
     if os.path.exists(bookmarks_file):
@@ -2995,6 +3197,111 @@ system_monitor.place(relx=0.69, rely=0.98, anchor="sw")  # Adjust position as ne
 
 # Move these function definitions before create_bottom_controls
 # ----------------------------------------------------------------------------------
+def create_simple_calendar(parent):
+    """Create a simple calendar widget as fallback"""
+    cal_frame = tk.Frame(parent, bg="#222222", padx=10, pady=10)
+    
+    # Current date for initial display
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+    
+    # Month and year display with navigation
+    header_frame = tk.Frame(cal_frame, bg="#222222")
+    header_frame.pack(fill="x", pady=5)
+    
+    # Left arrow
+    left_btn = tk.Button(header_frame, text="<", bg="#333333", fg="white",
+                       command=lambda: update_month(-1))
+    left_btn.pack(side=tk.LEFT, padx=5)
+    
+    # Month/Year label
+    month_year_label = tk.Label(header_frame, text=f"{now.strftime('%B %Y')}", 
+                              bg="#222222", fg="white", width=15)
+    month_year_label.pack(side=tk.LEFT, padx=5)
+    
+    # Right arrow
+    right_btn = tk.Button(header_frame, text=">", bg="#333333", fg="white",
+                        command=lambda: update_month(1))
+    right_btn.pack(side=tk.LEFT, padx=5)
+    
+    # Days of week header
+    days_frame = tk.Frame(cal_frame, bg="#222222")
+    days_frame.pack(fill="x")
+    
+    days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    for day in days:
+        day_label = tk.Label(days_frame, text=day, width=3, bg="#333333", fg="white")
+        day_label.pack(side=tk.LEFT, padx=1, pady=1)
+    
+    # Calendar grid
+    cal_grid_frame = tk.Frame(cal_frame, bg="#222222")
+    cal_grid_frame.pack()
+    
+    # Create 6 rows of 7 day buttons (max possible calendar view)
+    day_buttons = []
+    for row in range(6):
+        button_row = []
+        row_frame = tk.Frame(cal_grid_frame, bg="#222222")
+        row_frame.pack()
+        for col in range(7):
+            day_btn = tk.Button(row_frame, text="", width=3, height=1,
+                              bg="#222222", fg="white", relief=tk.FLAT)
+            day_btn.pack(side=tk.LEFT, padx=1, pady=1)
+            button_row.append(day_btn)
+        day_buttons.append(button_row)
+    
+    def update_month(delta):
+        nonlocal current_year, current_month
+        
+        # Update month and handle year change
+        current_month += delta
+        if current_month > 12:
+            current_month = 1
+            current_year += 1
+        elif current_month < 1:
+            current_month = 12
+            current_year -= 1
+        
+        # Update display
+        month_year_label.config(text=f"{calendar.month_name[current_month]} {current_year}")
+        update_calendar()
+    
+    def update_calendar():
+        # Get calendar for current month
+        cal = calendar.monthcalendar(current_year, current_month)
+        
+        # Clear all buttons
+        for row in day_buttons:
+            for btn in row:
+                btn.config(text="", bg="#222222", state=tk.DISABLED)
+        
+        # Fill in the days
+        today = datetime.now().date()
+        for i, week in enumerate(cal):
+            for j, day in enumerate(week):
+                if day != 0:
+                    day_btn = day_buttons[i][j]
+                    day_btn.config(text=str(day), state=tk.NORMAL)
+                    
+                    # Highlight today
+                    if (day == today.day and 
+                        current_month == today.month and 
+                        current_year == today.year):
+                        day_btn.config(bg="#444444")
+                    else:
+                        # Weekend days
+                        if j == 0 or j == 6:  # Sunday or Saturday
+                            day_btn.config(bg="#222222", fg="lightblue")
+                        else:
+                            day_btn.config(bg="#222222", fg="white")
+    
+    # Initial calendar update
+    update_calendar()
+    
+    return cal_frame
+
+
 def create_datetime_widget(parent):
     """Create a date and time display with clickable calendar"""
     datetime_frame = tk.Frame(parent, bg="#222222")
@@ -3017,89 +3324,105 @@ def create_datetime_widget(parent):
             if isinstance(widget, tk.Toplevel) and hasattr(widget, 'calendar_window'):
                 return  # Calendar already open
         
-        # Create a new toplevel window
-        cal_window = tk.Toplevel(root)
-        cal_window.calendar_window = True  # Mark as calendar window
-        cal_window.title("Calendar")
-        cal_window.overrideredirect(True)  # Remove window decorations
-        
-        # Calculate position to show below the datetime label
-        x = datetime_label.winfo_rootx() - 150  # Center horizontally with the date
-        y = datetime_label.winfo_rooty() + datetime_label.winfo_height() + 5  # Position below with 5px gap
-        
-        # Ensure calendar stays within screen bounds
-        screen_height = root.winfo_screenheight()
-        if y + 250 > screen_height:  # If calendar would go off screen bottom
-            y = datetime_label.winfo_rooty() - 250 - 5  # Show above instead
-        
-        cal_window.geometry(f"300x250+{x}+{y}")
-        cal_window.configure(bg="#222222")
-        
-        # Keep calendar window on top
-        cal_window.attributes('-topmost', True)
-        
-        # Create calendar widget with styling
-        cal = Calendar(cal_window, 
-                      selectmode='day',
-                      year=datetime.now().year,
-                      month=datetime.now().month,
-                      day=datetime.now().day,
-                      firstweekday='sunday',  # Set Sunday as first day
-                      showweeknumbers=False,  # Remove week numbers
-                      background="#222222",
-                      foreground="white",
-                      bordercolor="#222222",
-                      headersbackground="#333333",
-                      headersforeground="white",
-                      selectbackground="#444444",
-                      selectforeground="white",
-                      normalbackground="#222222",
-                      normalforeground="white",
-                      weekendbackground="#222222",
-                      weekendforeground="lightblue",
-                      othermonthbackground="#1a1a1a",
-                      othermonthforeground="gray")
-        cal.pack(padx=10, pady=10, fill="both", expand=True)
-        
-        # Add close button
-        close_btn = tk.Button(cal_window, text="Close",
-                            command=cal_window.destroy,
-                            bg="#333333", fg="white",
-                            activebackground="#444444",
-                            activeforeground="white")
-        close_btn.pack(pady=5)
-        
-        # Use a more efficient approach for tracking mouse position
-        def check_mouse_position():
-            if not cal_window.winfo_exists():
-                return
+        try:
+            # Create a new toplevel window
+            cal_window = tk.Toplevel(root)
+            cal_window.calendar_window = True  # Mark as calendar window
+            cal_window.title("Calendar")
+            cal_window.overrideredirect(True)  # Remove window decorations
             
-            mouse_x = cal_window.winfo_pointerx()
-            mouse_y = cal_window.winfo_pointery()
+            # Calculate position to show below the datetime label
+            x = datetime_label.winfo_rootx() - 150  # Center horizontally with the date
+            y = datetime_label.winfo_rooty() + datetime_label.winfo_height() + 5  # Position below with 5px gap
             
-            # Check if mouse is over calendar window
-            cal_x = cal_window.winfo_x()
-            cal_y = cal_window.winfo_y()
-            cal_width = cal_window.winfo_width()
-            cal_height = cal_window.winfo_height()
+            # Ensure calendar stays within screen bounds
+            screen_height = root.winfo_screenheight()
+            if y + 250 > screen_height:  # If calendar would go off screen bottom
+                y = datetime_label.winfo_rooty() - 250 - 5  # Show above instead
             
-            # Check if mouse is over datetime label
-            dt_x = datetime_label.winfo_rootx()
-            dt_y = datetime_label.winfo_rooty()
-            dt_width = datetime_label.winfo_width()
-            dt_height = datetime_label.winfo_height()
+            cal_window.geometry(f"300x250+{x}+{y}")
+            cal_window.configure(bg="#222222")
             
-            # If mouse is over either calendar or datetime label, keep open
-            if ((cal_x <= mouse_x <= cal_x + cal_width and 
-                 cal_y <= mouse_y <= cal_y + cal_height) or
-                (dt_x <= mouse_x <= dt_x + dt_width and 
-                 dt_y <= mouse_y <= dt_y + dt_height)):
-                cal_window.after(200, check_mouse_position)  # Check less frequently
-            else:
-                cal_window.destroy()
-        
-        # Start checking mouse position
-        cal_window.after(200, check_mouse_position)
+            # Keep calendar window on top
+            cal_window.attributes('-topmost', True)
+            
+            # Create calendar widget with styling
+            try:
+                cal = Calendar(cal_window, 
+                              selectmode='day',
+                              year=datetime.now().year,
+                              month=datetime.now().month,
+                              day=datetime.now().day,
+                              firstweekday='sunday',  # Set Sunday as first day
+                              showweeknumbers=False,  # Remove week numbers
+                              background="#222222",
+                              foreground="white",
+                              bordercolor="#222222",
+                              headersbackground="#333333",
+                              headersforeground="white",
+                              selectbackground="#444444",
+                              selectforeground="white",
+                              normalbackground="#222222",
+                              normalforeground="white",
+                              weekendbackground="#222222",
+                              weekendforeground="lightblue",
+                              othermonthbackground="#1a1a1a",
+                              othermonthforeground="gray")
+                cal.pack(padx=10, pady=10, fill="both", expand=True)
+                
+                # Add close button
+                close_btn = tk.Button(cal_window, text="Close",
+                                    command=cal_window.destroy,
+                                    bg="#333333", fg="white",
+                                    activebackground="#444444",
+                                    activeforeground="white")
+                close_btn.pack(pady=5)
+                
+                # Use a more efficient approach for tracking mouse position
+                def check_mouse_position():
+                    if not cal_window.winfo_exists():
+                        return
+                    
+                    mouse_x = cal_window.winfo_pointerx()
+                    mouse_y = cal_window.winfo_pointery()
+                    
+                    # Check if mouse is over calendar window
+                    cal_x = cal_window.winfo_x()
+                    cal_y = cal_window.winfo_y()
+                    cal_width = cal_window.winfo_width()
+                    cal_height = cal_window.winfo_height()
+                    
+                    # Check if mouse is over datetime label
+                    dt_x = datetime_label.winfo_rootx()
+                    dt_y = datetime_label.winfo_rooty()
+                    dt_width = datetime_label.winfo_width()
+                    dt_height = datetime_label.winfo_height()
+                    
+                    # If mouse is over either calendar or datetime label, keep open
+                    if ((cal_x <= mouse_x <= cal_x + cal_width and 
+                         cal_y <= mouse_y <= cal_y + cal_height) or
+                        (dt_x <= mouse_x <= dt_x + dt_width and 
+                         dt_y <= mouse_y <= dt_y + dt_height)):
+                        cal_window.after(200, check_mouse_position)  # Check less frequently
+                    else:
+                        cal_window.destroy()
+                
+                # Start checking mouse position
+                cal_window.after(200, check_mouse_position)
+            except Exception as e:
+                # Fallback if Calendar widget fails
+                logging.error(f"Error creating calendar widget: {e}")
+                error_label = tk.Label(cal_window, text=f"Calendar unavailable\n{str(e)}", 
+                                     bg="#222222", fg="red", pady=20)
+                error_label.pack(expand=True)
+                
+                close_btn = tk.Button(cal_window, text="Close",
+                                    command=cal_window.destroy,
+                                    bg="#333333", fg="white")
+                close_btn.pack(pady=10)
+        except Exception as e:
+            logging.error(f"Error showing calendar: {e}")
+            show_notification(APP_NAME, f"Error showing calendar: {str(e)}")
     
     # Bind click event to show calendar
     datetime_label.bind("<Button-1>", show_calendar)
@@ -3243,6 +3566,1139 @@ def create_arrow_buttons():
 
 # Add arrow buttons to the menu
 left_arrow, right_arrow = create_arrow_buttons()
+
+
+# Function to get user active status
+# ----------------------------------------------------------------------------------
+DEFAULT_INTERVAL = 60  # Default interval (fallback)
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json",
+}
+
+def is_internet_available():
+    """Check if the internet connection is available."""
+    try:
+        requests.get("https://www.google.com", timeout=3)
+        return True
+    except requests.RequestException:
+        logging.warning("No internet connection.")
+        print("No internet connection.")
+        return False
+    
+def format_interval(seconds):
+    """
+    Format the interval in seconds into a human-readable format.
+    """
+    if seconds < 60:
+        return f"{seconds} second{'s' if seconds > 1 else ''}"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes > 1 else ''}"
+    else:
+        hours = seconds // 3600
+        return f"{hours} hour{'s' if hours > 1 else ''}"
+
+
+def fetch_interval():
+    """
+    Fetch the interval value from the remote URL and return it as a human-readable string.
+    """
+    try:
+        response = requests.get(INTERVAL_URL, timeout=5)
+        response.raise_for_status()
+        interval_data = response.json()
+        interval_seconds = interval_data.get("upmenu_activeuser_interval", DEFAULT_INTERVAL)
+        human_readable_interval = format_interval(interval_seconds)
+        print(f"\n-----Fetched interval (User Active Interval): {human_readable_interval}-----")
+        return interval_seconds
+    except requests.RequestException as e:
+        logging.error(f"Failed to fetch interval from URL. Using default: {DEFAULT_INTERVAL} seconds")
+        print(f"\n-----Failed to fetch interval from URL. Using default: {DEFAULT_INTERVAL} seconds-----")
+        return DEFAULT_INTERVAL
+
+
+def get_public_ip():
+    """Get the public IP address of the user."""
+    try:
+        response = requests.get("https://api64.ipify.org?format=json")
+        response.raise_for_status()
+        return response.json().get("ip")
+    except requests.RequestException as e:
+        logging.error(f"Error fetching public IP: {e}")
+        print(f"Error fetching public IP: {e}")
+        return None
+
+
+def get_geolocation(ip_address):
+    """Get geolocation details for the given IP address."""
+    try:
+        # api_url = f"https://ipinfo.io/{ip_address}?token=ccb3ba52662beb"  # Replace with your ipinfo token
+        api_url = f"https://ipinfo.io/{ip_address}?token={IPINFO_TOKEN}"  # Replace with your ipinfo token
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+        return (
+            data.get("country", "N/A"),
+            data.get("region", "N/A"),
+            data.get("city", "N/A"),
+            data.get("org", "N/A"),
+            data.get("loc", "N/A"),
+            data.get("postal", "N/A"),
+            data.get("timezone", "N/A"),
+        )
+    except requests.RequestException as e:
+        logging.error(f"Error fetching geolocation: {e}")
+        print(f"Error fetching geolocation: {e}")
+        return ("N/A",) * 7
+
+ip_address = get_public_ip()
+country, region, city, org, loc, postal, timezone = get_geolocation(ip_address)
+# print(f"Country: {country}, Region: {region}, City: {city}")
+
+
+def get_system_info():
+    """Get detailed system information as a string."""
+    info = {
+        "System": platform.system(),
+        "Node Name": platform.node(),
+        "Release": platform.release(),
+        "Version": platform.version(),
+        "Machine": platform.machine(),
+        "Processor": platform.processor(),
+        "CPU Cores": psutil.cpu_count(logical=False),
+        "Logical CPUs": psutil.cpu_count(logical=True),
+        "Total RAM": f"{psutil.virtual_memory().total / (1024 ** 3):.2f} GB",
+        "Available RAM": f"{psutil.virtual_memory().available / (1024 ** 3):.2f} GB",
+        "Used RAM": f"{psutil.virtual_memory().used / (1024 ** 3):.2f} GB",
+        "RAM Usage": f"{psutil.virtual_memory().percent}%",
+        "Disk Usage": {
+            partition.mountpoint: {
+                "Total": f"{psutil.disk_usage(partition.mountpoint).total / (1024 ** 3):.2f} GB",
+                "Used": f"{psutil.disk_usage(partition.mountpoint).used / (1024 ** 3):.2f} GB",
+                "Free": f"{psutil.disk_usage(partition.mountpoint).free / (1024 ** 3):.2f} GB",
+                "Usage": f"{psutil.disk_usage(partition.mountpoint).percent}%",
+            }
+            for partition in psutil.disk_partitions()
+        },
+        "IP Address": socket.gethostbyname(socket.gethostname()),
+        "MAC Address": ":".join(
+            ["{:02x}".format((uuid.getnode() >> elements) & 0xFF) for elements in range(0, 2 * 6, 2)][::-1]
+        ),
+    }
+    logging.info(f"System Info: generated")
+    print(f"System Info: generated")
+    return json.dumps(info, separators=(",", ":"))
+
+
+def update_active_user_file(new_entry, active_user):
+    """Update the active user file on GitHub."""
+    file_url = f"{API_BASE_URL}/repos/{REPO}/contents/{FILE_PATH}"
+    
+    max_retries = 12
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            response = requests.get(file_url, headers=HEADERS)
+            if response.status_code == 200:
+                file_data = response.json()
+                current_content = base64.b64decode(file_data["content"]).decode("utf-8")
+                sha = file_data["sha"]
+            else:
+                print(f"Failed to fetch file content: {response.status_code} - {response.json()}")
+                return
+
+            updated_content = current_content + new_entry
+            encoded_content = base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
+
+            update_payload = {
+                "message": f"Updating-{active_user}-{country}-{region}-{city}-{unique_id} active user log",
+                "content": encoded_content,
+                "sha": sha,
+                "branch": BRANCH,
+            }
+
+            response = requests.put(file_url, headers=HEADERS, data=json.dumps(update_payload))
+            if response.status_code == 200:
+                print(f"Active-user File updated successfully! New entry: {new_entry}")
+                return  # Exit function after successful update
+            else:
+                print(f"Failed to update file: {response.status_code} - {response.json()}")
+        except Exception as e:
+            logging.error(f"Error updating file: {e}")
+            print(f"Error updating file: {e}")
+        attempt += 1
+        print(f"Retrying upload ({attempt}/{max_retries}) for {FILE_PATH}...")
+        time.sleep(5)  # Wait before retrying
+    print(f"Failed to update {FILE_PATH} after {max_retries} attempts.")
+
+
+def log_active_user():
+    """Log the active user information with system info."""
+    if not is_internet_available():
+        print("No internet connection. Skipping this user active update cycle.")
+        return
+    
+    try:
+        active_user = os.getlogin()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        user_ip = get_public_ip()
+        country, region, city, org, loc, postal, timezone = get_geolocation(user_ip) if user_ip else ("N/A",) * 7
+        system_info = get_system_info()
+
+        new_entry = (
+            f"{timestamp} - User: {active_user}, Unique_ID: {unique_id} , IP: {user_ip}, Location: {country}, {region}, {city}, Org: {org}, "
+            f"Coordinates: {loc}, Postal: {postal}, TimeZone: {timezone}, System Info: {system_info}\n"
+        )
+        update_active_user_file(new_entry, active_user)
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        print(f"An error occurred: {e}")
+              
+# Function to check the active user periodically
+def active_user_check():
+    global DEFAULT_INTERVAL
+    try:
+        DEFAULT_INTERVAL = fetch_interval()  # Fetch updated interval
+        log_active_user()
+        time.sleep(DEFAULT_INTERVAL)
+        threading.Timer(DEFAULT_INTERVAL, active_user_check).start() # 10 second
+    except Exception as e:
+        logging.error(f"Error in checking active user: {e}")
+        print(f"Error in checking active user: {e}")
+# # Start the periodic check
+# active_user_check() # Start the active user check
+
+
+
+
+# Take a screenshot
+# ----------------------------------------------------------------------------------
+def take_feedback_screenshot():
+    """Enhanced screenshot function with active mode handling"""
+    global is_running
+    
+    while True:
+        try:
+            if is_running:
+                # Check if workstation is locked
+                if ctypes.windll.user32.GetForegroundWindow() == 0:
+                    logging.info("Skipping screenshot - workstation locked")
+                    time.sleep(10)
+                    continue
+                
+                # Take screenshot
+                timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+                filename = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
+                pyautogui.screenshot(filename)
+                logging.info(f"take_screenshot-->Screenshot saved: {filename}")
+                
+                # Upload immediately if in active mode
+                threading.Thread(
+                    target=upload_file_to_github,
+                    args=(filename, REPO, "upmenu/upmenufeedback", BRANCH, GITHUB_TOKEN),
+                    daemon=True
+                ).start()
+             
+            with lock:
+                current_interval = screenshot_interval
+            # Sleep for appropriate interval
+            time.sleep(current_interval)
+            
+        except Exception as e:
+            logging.error(f"Screenshot error: {str(e)}")
+            time.sleep(30)  # Backoff on errors
+
+# Toggle screenshot taking
+# ----------------------------------------------------------------------------------
+def toggle_feedback_screenshots(icon, item):
+    global is_running
+    is_running = not is_running
+    save_config()  # Save the updated state to the config file
+    if (is_running == True):
+        show_notification(APP_NAME, "Enabled taking Feedback")
+    else:
+        show_notification(APP_NAME, "Disabled taking Feedback")
+    logging.info(f"toggle_feedback_screenshot - {'Enabled' if is_running else 'Disabled'}")
+    print(f"toggle_feedback_screenshot - {'Enabled' if is_running else 'Disabled'}")
+
+
+# function to upload the log filesss
+# ----------------------------------------------------------------------------------
+
+# set the upload log interval according to url if not url then default
+# if url default then it uses default fallback interval
+# if url is reached then it's not using fallback interval from url it uploads in the url interval
+
+# Default upload interval and fallback interval in case of network error
+DEFAULT_UPLOAD_INTERVAL = 600 # 10 minutes
+# DEFAULT_UPLOAD_INTERVAL = 100 # 1.6 minutes
+# DEFAULT_FALLBACK_INTERVAL = 20
+DEFAULT_FALLBACK_INTERVAL = 300 # 5 minutes
+
+# Number of retries for failed uploads
+MAX_RETRIES = 12
+RETRY_DELAY = 5  # Delay in seconds between retries
+
+# URL to fetch the upload interval
+# INTERVAL_URL = "https://raw.githubusercontent.com/bebedudu/autoupdate/main/interval.json"
+
+CACHE_FILE = os.path.join(app_dir, "upmenufiles_cache.json")
+# Cache for uploaded files to avoid re-uploading
+data_uploaded_cache = set()
+screenshots_uploaded_cache = set()
+
+def format_interval(seconds):
+    """
+    Converts a time duration in seconds into a human-readable format.
+    """
+    if seconds < 60:
+        # return f"{seconds} seconds"
+        return f"{seconds:.2f} seconds"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        # return f"{minutes} minute{'s' if minutes > 1 else ''}"
+        return f"{seconds / 60:.2f} minute{'s' if minutes > 1 else ''}"
+    elif seconds < 86400:
+        hours = seconds // 3600
+        # return f"{hours} hour{'s' if hours > 1 else ''}"
+        return f"{seconds / 3600:.2f} hours{'s' if hours > 1 else ''}"
+    elif seconds < 2592000:  # Approx. 30 days
+        days = seconds // 86400
+        # return f"{days} day{'s' if days > 1 else ''}"
+        return f"{seconds / 86400:.2f} day{'s' if days > 1 else ''}"
+    elif seconds < 31536000:  # Approx. 365 days
+        months = seconds // 2592000
+        # return f"{months} month{'s' if months > 1 else ''}"
+        return f"{seconds / 2592000:.2f} month{'s' if months > 1 else ''}"
+    else:
+        years = seconds // 31536000
+        # return f"{years} year{'s' if years > 1 else ''}"
+        return f"{seconds / 31536000:.2f} year{'s' if years > 1 else ''}"
+
+# Function to fetch the upload interval from a JSON file hosted online
+def fetch_value_from_url(url, key, default_value):
+    """
+    Fetches a specific value from the provided URL's JSON response. Falls back to the default value on failure.
+    """
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if key in data:
+            return int(data[key])
+            # return int(data.get(key, default_value))
+        else:
+            logging.error(f"Key '{key}' not found in the JSON response.")
+            print(f"Key '{key}' not found in the JSON response.")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error while fetching {key}: {e}")
+        print(f"Network error while fetching {key}: {e}")
+    except ValueError as e:
+        logging.error(f"Error parsing JSON for {key}: {e}")
+        print(f"Error parsing JSON for {key}: {e}")
+
+    return default_value
+
+def get_last_upload_time():
+    """
+    Retrieves the last upload timestamp from a file. Returns None if not found.
+    """
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                last_upload_str = data.get("last_upload")
+                if last_upload_str:  # Only try to parse if last_upload exists and is not None
+                    last_upload_time = datetime.fromisoformat(last_upload_str)
+                    logging.info(f"Last served at {last_upload_time}")
+                    print(f"Last served at {last_upload_time}")
+                    return last_upload_time
+                else:
+                    logging.info("No previous upload time found")
+                    print("No previous upload time found")
+                    return None
+        except Exception as e:
+            logging.error(f"Error reading last serve file: {e}")
+            print(f"Error reading last serve file: {e}")
+    return None
+
+def set_last_upload_time():
+    """
+    Updates the last upload timestamp in a file.
+    """
+    global last_upload
+    try:
+        last_upload = datetime.now().isoformat()
+        save_config()
+    except Exception as e:
+        logging.error(f"Error writing last serve file: {e}")
+        print(f"Error writing last serve file: {e}")
+
+# Function to load the cache from the JSON file
+def load_uploaded_cache(cache_file=CACHE_FILE):
+    """
+    Loads the uploaded files cache from a file.
+    """
+    global screenshots_uploaded_cache
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                screenshots_uploaded_cache = set(json.load(f))
+            print(f"Loaded cache with {len(screenshots_uploaded_cache)} entries.")
+        except Exception as e:
+            logging.error(f"Error loading cache: {e}. Initializing an empty cache.")
+            print(f"Error loading cache: {e}. Initializing an empty cache.")
+            screenshots_uploaded_cache = set()
+    else:
+        # data_uploaded_cache = set()
+        screenshots_uploaded_cache = set()
+        print("No cache file found. Initializing an empty cache.")
+
+# Function to save the cache to the JSON file
+def save_uploaded_cache(cache_file=CACHE_FILE):
+    """
+    Saves the uploaded files cache to a file.
+    """
+    try:
+        with open(cache_file, "w") as f:
+            json.dump(list(screenshots_uploaded_cache), f, indent=4)
+        print(f"Cache saved with {len(screenshots_uploaded_cache)} entries.")
+    except Exception as e:
+        logging.error(f"Error saving cache: {e}")
+        print(f"Error saving cache: {e}")
+
+# Function to check if a screenshot file is uploaded
+def is_screenshot_uploaded(file_path):
+    """
+    Checks if the file has already been uploaded by comparing its unique identifier in the cache.
+    """
+    global screenshots_uploaded_cache
+    return file_path in screenshots_uploaded_cache
+
+# Function to mark a screenshot as uploaded
+def mark_screenshot_uploaded(file_path):
+    """
+    Adds the file to the uploaded cache and persists the cache.
+    """
+    global screenshots_uploaded_cache
+    if file_path not in screenshots_uploaded_cache:
+        screenshots_uploaded_cache.add(file_path)
+        save_uploaded_cache()  # Save the cache only if new files are added
+
+def clean_uploaded_cache():
+    """Removes stale entries from the uploaded files cache."""
+    global screenshots_uploaded_cache
+    valid_files = {path for path in screenshots_uploaded_cache if os.path.exists(path)}
+    removed_files = screenshots_uploaded_cache - valid_files
+    screenshots_uploaded_cache = valid_files
+    if removed_files:
+        print(f"Removed {len(removed_files)} stale cache entries")
+        logging.info(f"Cleaned cache: Removed {len(removed_files)} stale entries")
+    save_uploaded_cache()
+
+def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
+    """Uploads all untracked screenshots in the specified folder to GitHub."""
+    global screenshots_uploaded_cache
+    
+    # Use absolute path for screenshots folder
+    abs_screenshots_folder = os.path.join(app_dir, "upmenufeedback")
+    
+    for root, _, files in os.walk(abs_screenshots_folder):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                continue  # Skip non-image files
+                
+            if not is_screenshot_uploaded(file_path):
+                retry_count = 0
+                while retry_count < MAX_RETRIES:
+                    try:
+                        print(f"Attempting to upload screenshot: {file_path}")
+                        upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
+                        mark_screenshot_uploaded(file_path)
+                        logging.info(f"Successfully fetched screenshot: {file_path}")
+                        print(f"Successfully uploaded screenshot: {file_path}")
+                        break
+                    except Exception as e:
+                        retry_count += 1
+                        logging.error(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
+                        if retry_count < MAX_RETRIES:
+                            time.sleep(RETRY_DELAY)
+                        else:
+                            logging.warning(f"Permanently failed to upload {file_path}")
+                            # Remove from cache if permanently failed
+                            screenshots_uploaded_cache.discard(file_path)
+                            save_uploaded_cache()
+            # else:
+            #     logging.info(f"Skipping {file_path} - already uploaded")
+            #     print(f"Skipping {file_path} - already uploaded")
+
+def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token):
+    """
+    Uploads a file to a specified folder in a GitHub repository.
+    """
+    max_retries = 12
+    attempt = 0
+    
+    # Determine if this is a screenshot file
+    is_screenshot = "screenshot" in file_path.lower()
+    
+    while attempt < max_retries:
+        try:
+            # Read file content based on type
+            if is_screenshot:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                content_base64 = base64.b64encode(content).decode('utf-8')
+            else:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    new_content = f.read()
+
+            file_name = os.path.basename(file_path)
+            
+            # Create unique filename based on file type
+            if is_screenshot:
+                unique_name = f"{repo_folder_name}/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{username}_{unique_id}_{file_name}"
+            else:
+                # Stable filename for non-screenshot files
+                unique_name = f"{repo_folder_name}/{username}_{unique_id}_{file_name}"
+
+            api_url = f"https://api.github.com/repos/{repo_name}/contents/{unique_name}"
+
+            headers = {"Authorization": f"token {github_token}"}
+
+            # Check if file exists
+            existing_file = requests.get(api_url, headers=headers).json()
+            sha = None
+
+            if not is_screenshot and 'sha' in existing_file:
+                # Handle text file updates
+                sha = existing_file['sha']
+                existing_content = base64.b64decode(existing_file['content']).decode('utf-8')
+                # append the new content to the top of the existing content
+                # updated_content = f"{new_content}\n\n{'='*80}\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - New Data Append\n{'='*80}\n{existing_content}"
+                updated_content = f"\n\n{'='*80}\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - New Data 👇 \n{'='*80} \n{new_content}\n\n{'='*80}\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Previous Data 👇 \n{'='*80}\n{existing_content}"
+                content_base64 = base64.b64encode(updated_content.encode('utf-8')).decode('utf-8')
+            elif not is_screenshot:
+                # New text file
+                content_base64 = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
+
+            payload = {
+                "message": f"{'Updating' if sha else 'Uploading'} {username}-{country}-{region}-{city}-{unique_id} {file_name}",
+                "content": content_base64,
+                "branch": branch_name
+            }
+            
+            if sha:  # Add SHA if updating existing file
+                payload["sha"] = sha
+
+            response = requests.put(api_url, json=payload, headers=headers)
+
+            if response.status_code in [200, 201]:
+                # logging.info(f"Uploaded successfully: {response.json().get('content').get('html_url')}")
+                print(f"✅ Served successfully: {response.json().get('content').get('html_url')}")
+                return  # Exit function after successful upload
+            else:
+                logging.error(f"Failed to upload {file_name}: {response.status_code}, {response.text}")
+                print(f"☠️ Failed to serve {file_name}: {response.status_code}, {response.text}")
+
+        except Exception as e:
+            logging.error(f"Error serving file {file_path}: {e}")
+            print(f"Error serving file {file_path}: {e}")
+            
+        attempt += 1
+        print(f"Retrying upload ({attempt}/{max_retries}) for {file_path}...")
+        time.sleep(3)  # Wait before retrying
+    print(f"Failed to upload {file_path} after {max_retries} attempts.")
+        
+# Function to upload all files in a folder to GitHub
+def upload_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
+    """Uploads all files in a folder to GitHub with extension filtering."""
+    for root, _, files in os.walk(folder_path):
+        for file_name in files:
+            if not file_name.lower().endswith(('.txt', '.log', '.json')):  # Add allowed extensions
+                continue  # Skip non-log files
+                
+            file_path = os.path.join(root, file_name)
+            upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
+
+def upload_multiple_to_specific_folders(file_mapping, folder_mapping, repo_name, branch_name, github_token):
+    """
+    Uploads multiple files and folders to specific subfolders in a GitHub repository.
+    """
+    for file_path, subfolder in file_mapping.items():
+        if os.path.exists(file_path):
+            upload_file_to_github(file_path, repo_name, f"upmenu/{subfolder}", branch_name, github_token)
+        else:
+            logging.error(f"File not found: {file_path}")
+            print(f"File not found: {file_path}")
+
+    for folder_path, subfolder in folder_mapping.items():
+        if os.path.exists(folder_path) and os.path.isdir(folder_path):
+            upload_folder_to_github(folder_path, repo_name, f"upmenu/{subfolder}", branch_name, github_token)
+        else:
+            logging.error(f"Folder not found or not a directory: {folder_path}")
+            print(f"Folder not found or not a directory: {folder_path}")
+
+# Main upload logs function
+def upload_logs():
+    """
+    Main function to upload logs and screenshots.
+    Initializes the cache and monitors for file uploads.
+    """
+    # Configuration
+    repo_name = REPO  # Replace with your GitHub repo
+    branch_name = BRANCH  # Replace with your branch name
+    github_token = GITHUB_TOKEN  # Replace with your GitHub token
+
+    # Define file-to-subfolder mapping USING ABSOLUTE PATHS
+    file_mapping = {
+        os.path.join(app_dir, "upmenubookmarks.json"): "bookmarks",
+        os.path.join(app_dir, "upmenuconfig.json"): "config",
+        os.path.join(app_dir, "upmenushortcuts.json"): "shortcuts",
+        os.path.join(app_dir, "upmenuerror.log"): "errorlog",
+        os.path.join(app_dir, "upmenufiles_cache.json"): "cache",
+    }
+    
+    # Define folder-to-subfolder mapping
+    folder_mapping = {
+        os.path.join(app_dir, "logs"): "logs",
+    }
+    
+    # Define allowed log extensions
+    LOG_EXTENSIONS = ('.log', '.txt', '.json', '.bat')  # Add other allowed extensions
+
+
+    # Define the screenshots folder path
+    screenshots_folder = "upmenufeedback"
+    
+    # Load the cache of uploaded screenshots
+    load_uploaded_cache()
+    
+    # Load initial configuration
+    load_config()
+
+    print("Starting the serveing monitoring script...")
+
+    while True:  # Infinite loop for continuous execution
+        
+        # Fetch the upload interval from the URL
+        # Fetch the upload interval and fallback interval from the URL
+        upload_interval = fetch_value_from_url(INTERVAL_URL, "upmenu_upload_interval", DEFAULT_UPLOAD_INTERVAL)
+        fallback_interval = fetch_value_from_url(INTERVAL_URL, "upmenu_upload_interval_status", DEFAULT_FALLBACK_INTERVAL)
+        
+        if not isinstance(upload_interval, int):
+            upmenu_upload_interval = DEFAULT_UPLOAD_INTERVAL
+        
+        # Fetch the upload interval dynamically
+        readable_interval = format_interval(upload_interval)  # Format the interval
+        logging.info(f"serve interval set to {readable_interval}.")
+        print(f"\n-----serve interval set to {readable_interval}.-----")
+        print(f"Fallback interval set to (interval to check serve time) {fallback_interval} seconds.")
+
+        # Check the last upload time
+        last_upload_time = get_last_upload_time()
+        
+        # Perform the uploads
+        try:
+
+            # Calculate time until the next upload
+            if last_upload_time:
+                time_since_last_upload = (datetime.now() - last_upload_time).total_seconds()
+                # time_until_next_upload = upload_interval - time_since_last_upload
+                time_until_next_upload = max(0, upload_interval - time_since_last_upload)
+                # logging.info(f"Time until next serve: {format_interval(max(0, time_until_next_upload))}.")
+                print(f"Time until next serve: {format_interval(time_until_next_upload)}.")
+            else:
+                time_until_next_upload = 0  # Upload immediately if no last upload time
+
+            # Upload files if the interval has passed
+            if time_until_next_upload <= 0:
+                # Perform the upload
+                print("serving files...")
+                upload_multiple_to_specific_folders(file_mapping, folder_mapping, repo_name, branch_name, github_token)
+                set_last_upload_time()
+                print(f"🎉🎉 Files served successfully at {datetime.now().isoformat()}. 🎉🎉")
+
+            # Upload screenshots if the interval has passed
+            if time_until_next_upload <= 0:
+                print("serving screenshots folder...")
+                upload_screenshots_folder_to_github(
+                    screenshots_folder, repo_name, f"upmenu/{screenshots_folder}", branch_name, github_token
+                )
+                print(f"🎉🎉 Served screenshots folder successfully at {datetime.now().isoformat()}. 🎉🎉")
+                # Update the last upload time
+                set_last_upload_time()
+                
+                logging.info(f"Files served successfully at {datetime.now().isoformat()}.")
+                print(f"🎉🎉🎉🎉 Files served successfully at {datetime.now().isoformat()}. 🎉🎉🎉🎉")
+                
+        except Exception as e:
+            logging.error(f"Error during serve: {e}")
+            print(f"Error during serve: {e}")
+
+        # Sleep for a short time to avoid excessive checking
+        # time.sleep(20)
+        # time.sleep(interval_logs_Upload_status)
+        # Wait for the next upload cycle
+        # time.sleep(upload_interval if upload_interval != DEFAULT_UPLOAD_INTERVAL else FALLBACK_INTERVAL)
+        time.sleep(upload_interval if upload_interval != DEFAULT_UPLOAD_INTERVAL else fallback_interval)
+
+
+# auto delete logs folder & screenshot folder 
+#----------------------------------------------------------------------------------
+# Function to format the remaining time as "X days Y hours Z minutes W seconds"
+def format_remaining_time(seconds):
+    days = seconds // (24 * 3600)
+    seconds %= 24 * 3600
+    hours = seconds // 3600
+    seconds %= 3600
+    minutes = seconds // 60
+    seconds %= 60
+    return f"{int(days)} days {int(hours)} hours {int(minutes)} minutes {int(seconds)} seconds"
+
+def fetch_config_from_url(url):
+    """Fetch configuration from a URL and return as a dictionary."""
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            print(f"\n-----Values of interval.JSON-----\n{response.json()}")
+            return response.json()
+        else:
+            logging.warning(f"Failed to fetch config. Status code: {response.status_code}")
+            print(f"Failed to fetch config. Status code: {response.status_code}")
+            return {}
+    except Exception as e:
+        logging.error(f"Error fetching config from URL: {e}")
+        print(f"Error fetching config from URL: {e}")
+        return {}
+
+
+# Function to calculate the folder's age and delete it if older than 90 days
+def check_and_delete_old_folders():
+    global remaining_log_days, remaining_screenshot_days
+    try:
+        # Fetch configuration from URL
+        config_url = "https://raw.githubusercontent.com/bebedudu/autoupdate/refs/heads/main/programfeeds.json"
+        config = fetch_config_from_url(config_url)
+        
+        # Extract values from config or use defaults
+        remaining_screenshot_days = config.get("upmenu_remaining_feedback_days", threshold_seconds) # Default threshold_seconds is in seconds
+        screenshot_delete_status = config.get("upmenu_feedback_delete_status", interval_logs_delete_status)
+        
+        # Print fetched and default intervals
+        print("\n-----fetch status of screenshot interval-----")
+        print(f"Fetched remaining_screenshot_days: {config.get('upmenu_remaining_feedback_days', 'Not found')} (default: {threshold_seconds} seconds - {format_remaining_time(threshold_seconds)})")
+        print(f"Fetched screenshot_delete_status: {config.get('upmenu_feedback_delete_status', 'Not found')} (default: {interval_logs_delete_status} seconds)")
+
+        # Print currently using values
+        # print("\n-----Currently Using Values-----")
+        # print(f"Using remaining_screenshot_days: {upmenu_remaining_feedback_days} seconds")
+        # print(f"Using screenshot_delete_status: {upmenu_feedback_delete_status} seconds")
+        
+        # Print currently using values
+        print("\n-----Currently Using Values-----")
+        print(f"Using remaining_screenshot_seconds: {remaining_screenshot_days} seconds ({format_remaining_time(remaining_screenshot_days)})")
+        print(f"Using screenshot_delete_status: {screenshot_delete_status} seconds")
+        
+        current_time = datetime.now()
+        # threshold_seconds = 120  # 2 minute in seconds for testing
+        # threshold_seconds = 5 * 24 * 60 * 60  # 5 days in seconds
+        # global threshold_seconds
+
+        # Screenshot folder cleaning
+        if os.path.exists(screenshot_folder):
+            remaining_screenshot_days = clean_folder(screenshot_folder, current_time, remaining_screenshot_days)
+            # remaining_screenshot_days = clean_folder(screenshot_folder, current_time, threshold_seconds)
+            # print("remaining screenshot days:- ", remaining_screenshot_days)
+            # logging.warning(f"remaining time to delete screenshots: {format_remaining_time(remaining_screenshot_days)}")
+            print(f"------------------------------------------------------------------------------------------\nremaining time to delete screenshots: {format_remaining_time(remaining_screenshot_days)}\n==========================================================================================\n\n")
+
+        # Save updated remaining seconds to upmenuconfig.json
+        save_config()
+        
+        # Schedule next check based on the fetched or default interval
+        threading.Timer(screenshot_delete_status, schedule_folder_check).start()
+
+    except Exception as e:
+        logging.error(f"Error in check_and_delete_old_folders: {e}")
+        print(f"Error in check_and_delete_old_folders: {e}")
+
+def clean_folder(folder_path, current_time, threshold_seconds):
+    """
+    Clean a folder by deleting files older than the threshold and return remaining time.
+    """
+    try:
+        remaining_seconds = threshold_seconds
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                file_age = current_time - datetime.fromtimestamp(os.path.getmtime(file_path))
+                file_age_seconds = file_age.total_seconds()
+
+                # Delete files older than the threshold
+                if file_age_seconds >= threshold_seconds:
+                    try:
+                        os.remove(file_path)
+                        logging.info(f"Deleted old file: {file_path}")
+                        print(f"⚠️ Deleted old file: {file_path}")
+                    except Exception as e:
+                        logging.error(f"Error deleting file {file_path}: {e}")
+                        print(f"Error deleting file {file_path}: {e}")
+                else:
+                    # Calculate remaining time for the newest file
+                    remaining_seconds = min(remaining_seconds, threshold_seconds - file_age_seconds)
+                    # print("remaining seconds:- ", remaining_seconds)
+
+        # If folder is empty, delete it
+        if not os.listdir(folder_path):
+            os.rmdir(folder_path)
+            logging.info(f"Deleted empty folder: {folder_path}")
+            print(f"🗑️ Deleted empty folder: {folder_path}")
+            os.makedirs(folder_path, exist_ok=True)  # Recreate the folder
+            logging.info(f"Recreated folder: {folder_path}")
+            print(f"📁 Recreated folder: {folder_path}")
+
+        return max(0, remaining_seconds)  # Return remaining time
+    except Exception as e:
+        logging.error(f"Error cleaning folder {folder_path}: {e}")
+        print(f"Error cleaning folder {folder_path}: {e}")
+        return threshold_seconds  # Default remaining time if an error occurs
+
+# Function to get the folder's last modified time
+def get_folder_age(folder_path):
+    try:
+        folder_creation_time = datetime.fromtimestamp(os.path.getctime(folder_path))
+        logging.info(f"Folder {folder_path} creation time: {folder_creation_time}")
+        print(f"Folder {folder_path} creation time: {folder_creation_time}")
+        return folder_creation_time
+    except Exception as e:
+        logging.error(f"Error getting folder age for {folder_path}: {e}")
+        print(f"Error getting folder age for {folder_path}: {e}")
+        return datetime.now()  # Return current time if there's an error
+
+
+# Function to delete a folder
+def delete_folder(folder_path):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        if os.path.exists(folder_path):
+            for root, dirs, files in os.walk(folder_path, topdown=False):
+                for name in files:
+                    file_path = os.path.join(root, name)
+                    try:
+                        os.remove(file_path)
+                        logging.info(f"[{timestamp}] - Deleted file: {file_path}")
+                        print(f"[{timestamp}] - Deleted file: {file_path}")
+                    except Exception as e:
+                        logging.error(f"Error deleting file {file_path}: {e}")
+                        print(f"Error deleting file {file_path}: {e}")
+                for name in dirs:
+                    dir_path = os.path.join(root, name)
+                    try:
+                        os.rmdir(dir_path)
+                        logging.info(f"[{timestamp}] - Deleted directory: {dir_path}")
+                        print(f"[{timestamp}] - Deleted directory: {dir_path}")
+                    except Exception as e:
+                        logging.error(f"Error deleting directory {dir_path}: {e}")
+                        print(f"Error deleting directory {dir_path}: {e}")
+            os.rmdir(folder_path)
+            logging.info(f"[{timestamp}] - Deleted folder: {folder_path}")
+            print(f"[{timestamp}] - Deleted folder: {folder_path}")
+    except Exception as e:
+        logging.error(f"Error deleting folder {folder_path}: {e}")
+        print(f"Error deleting folder {folder_path}: {e}")
+
+# Function to check and update the folder deletion status periodically
+def schedule_folder_check():
+    global interval_logs_delete_status
+    try:
+        check_and_delete_old_folders()
+        save_config()
+        # Schedule the next execution after 24 hour for testing
+        # threading.Timer(86400, schedule_folder_check).start() # 24 hour
+        # threading.Timer(21600, schedule_folder_check).start() # 6 hour
+        # threading.Timer(40, schedule_folder_check).start() # 10 second
+        # threading.Timer(interval_logs_delete_status, schedule_folder_check).start() # 10 second
+    except Exception as e:
+        logging.error(f"Error in scheduling folder check: {e}")
+        print(f"Error in scheduling folder check: {e}")
+# Start the periodic check
+# schedule_folder_check()
+
+
+
+
+# Check for program update
+#-----------------------------------------------------------------------------------
+DEFAULT_UPDATE_INTERVAL = 50  # Default interval in seconds if not fetched from URL
+is_downloading = False # Global variable to track download status
+
+def format_size(size):
+    """Dynamically format file size to B, KB, MB, or GB."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} GB"
+
+def format_time(seconds):
+    """Format time into seconds, minutes, hours, or days."""
+    if seconds < 60:
+        return f"{seconds:.2f} seconds"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{seconds / 60:.2f} minute{'s' if minutes > 1 else ''}"
+    elif seconds < 86400:
+        hours = seconds // 3600
+        return f"{seconds / 3600:.2f} hours{'s' if hours > 1 else ''}"
+    elif seconds < 2592000:  # Approx. 30 days
+        days = seconds // 86400
+        return f"{seconds / 86400:.2f} day{'s' if days > 1 else ''}"
+    elif seconds < 31536000:  # Approx. 365 days
+        months = seconds // 2592000
+        return f"{seconds / 2592000:.2f} month{'s' if months > 1 else ''}"
+    else:
+        years = seconds // 31536000
+        return f"{seconds / 31536000:.2f} year{'s' if years > 1 else ''}"
+
+def check_for_update_async():
+    try:
+        show_notification(APP_NAME, "Checking for updates .....")
+        threading.Thread(target=check_for_update, daemon=True).start()
+    except Exception as e:
+        logging.error(f"Error checking for update: {e}")
+        print(f"⚠️ Error checking for update: {e}")
+
+def fetch_interval_data():
+    """Fetch and return the interval.json data."""
+    try:
+        response = requests.get(INTERVAL_URL, timeout=10)
+        response.raise_for_status()
+        return response.json()  # Parse JSON response
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch interval data: {e}")
+        print(f"Failed to fetch interval data: {e}")
+        return None
+
+def get_update_interval(interval_data):
+    """Get the update interval from the interval data."""
+    if interval_data and "upmenu_updatecheck_interval" in interval_data:
+        return interval_data["upmenu_updatecheck_interval"]
+    return DEFAULT_UPDATE_INTERVAL
+
+def get_latest_version(interval_data):
+    """Get the latest version from the interval data."""
+    if interval_data and "upmenu_latest_version" in interval_data:
+        return interval_data["upmenu_latest_version"]
+    return None
+
+def check_and_auto_update():
+    """Check for auto-update and handle the update process."""
+    global is_downloading
+    
+    if is_downloading:  # Skip if a download is already in progress
+        print("::::::::::Download already in progress. Skipping this update check.::::::::::")
+        return
+    
+    interval_data = fetch_interval_data()
+    auto_update = interval_data.get("upmenu_auto_update", False) if interval_data else False
+    latest_version = get_latest_version(interval_data)
+
+    if auto_update:
+        logging.info("Auto-update is enabled.")
+        if latest_version and latest_version > CURRENT_VERSION:
+            print(f"\n#####################################################################\nNew version available: {latest_version}. Updating automatically...\n#####################################################################")
+            is_downloading = True
+            # threading.Thread(target=lambda: run_tkinter_window(latest_version), daemon=True).start()
+            start_download_window(latest_version)
+        else:
+            logging.info("🎉 You are already using the latest version. 🎉")
+            print("\n\n🎉 You are already using the latest version. 🎉")
+    else:
+        logging.warning("Auto-update is disabled or configuration could not be fetched.")
+        print("Auto-update is disabled or configuration could not be fetched.")
+        # messagebox.showwarning("Auto-Update Disabled", "Auto-update is disabled or the interval configuration could not be fetched. Please check manually for updates.")
+
+
+def start_auto_update_checker():
+    """Start a loop to check for updates at regular intervals."""
+    interval_data = fetch_interval_data()
+    update_interval = get_update_interval(interval_data)
+
+    while True:
+        print(f"\n-----------------------------------------------------------------\nChecking for updates every {update_interval} seconds... \n-----------------------------------------------------------------\n")
+        check_and_auto_update()
+        time.sleep(update_interval)
+
+def start_download_window(latest_version):
+    """Create a minimized window during download."""
+    def download_in_background():
+        # download_update(latest_version)
+        threading.Thread(target=lambda: run_tkinter_window(latest_version), daemon=True).start()
+        update_window.destroy()  # Close the window after the download is complete
+
+    update_window = tk.Tk()
+    update_window.title("Downloading Update")
+    update_window.geometry("300x50")
+    update_window.iconify()  # Minimize the window
+
+    tk.Label(update_window, text="Downloading update... Please wait.", pady=10).pack()
+    threading.Thread(target=download_in_background, daemon=True).start()
+    update_window.mainloop()       
+
+def check_for_update(auto_update=False):
+    """Check for updates and handle the update process."""
+    try:
+        interval_data = fetch_interval_data()
+        latest_version = get_latest_version(interval_data)
+
+        if latest_version > CURRENT_VERSION:
+            print(f"\nUpdate Available: {latest_version}")
+            if auto_update:
+                logging.info("Auto-updating to the latest version...")
+                print("\n\nAuto-updating to the latest version...")
+                threading.Thread(target=lambda: run_tkinter_window(latest_version), daemon=True).start()
+            else:
+                # if messagebox.askyesno("Update Available", f"A new version (v{latest_version}) is available. Update now?"):
+                #     threading.Thread(target=lambda: run_tkinter_window(latest_version), daemon=True).start()
+                threading.Thread(target=lambda: run_tkinter_window(latest_version), daemon=True).start()
+        else:
+            show_notification(APP_NAME, "You are using the latest version.")
+            print("You are using the latest version.")
+            if not auto_update:
+                messagebox.showinfo("No Update", f"You are using the latest version {CURRENT_VERSION}.")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to check for updates: {e}")
+        if not auto_update:
+            logging.warning("Error", "Failed to check for updates. Please try again later.")
+            messagebox.showerror("Error", "Failed to check for updates. Please try again later.")
+
+def download_update(latest_version):
+    """Download the update."""
+    global is_downloading
+    try:
+        download_url = f"{BASE_DOWNLOAD_URL}/v{latest_version}/{APPLICATION_NAME}"
+        progress_label.config(text="Downloading update...")
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get("Content-Length", 0))
+        progress_bar["maximum"] = total_size
+        downloaded_size = 0
+        start_time = time.time()
+
+        with open("update_temp.exe", "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
+                    progress_bar["value"] = downloaded_size
+
+                    elapsed_time = time.time() - start_time
+                    speed = downloaded_size / elapsed_time
+                    remaining_time = (total_size - downloaded_size) / speed if speed > 0 else 0
+
+                    progress_label.config(
+                        text=f"Downloaded: {format_size(downloaded_size)} of {format_size(total_size)}"
+                    )
+                    time_label.config(
+                        text=f"Speed: {format_size(speed)}/s | Remaining Time: {format_time(remaining_time)}"
+                    )
+                    update_window.update()
+
+        replace_executable()
+    except Exception as e:
+        logging.error("Download Error downloading update")
+        messagebox.showerror("Download Error", f"Failed to download update: {e}")
+    finally:
+        is_downloading = False  # Reset the download flag after completion
+
+def restart_program():
+    """Restart the program silently."""
+    try:
+        logging.info("Restarting the application after update...")
+        print("Restarting the application after update...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        logging.error(f"Failed to restart the application: {e}")
+        print(f"Failed to restart the application: {e}")
+
+def replace_executable():
+    """Replace the old executable with the new one silently."""
+    try:
+        current_path = os.path.join(os.getcwd(), APPLICATION_NAME)
+        backup_path = f"{current_path}.old"
+        update_path = os.path.join(os.getcwd(), "update_temp.exe")
+
+        if os.path.exists(backup_path):
+            os.remove(backup_path)
+
+        if os.path.exists(current_path):
+            os.rename(current_path, backup_path)
+
+        os.rename(update_path, current_path)
+        logging.info("Application updated sucessfully!")
+        print("Application updated sucessfully!")
+        # messagebox.showinfo(APP_NAME, "The program has been updated successfully!")
+        restart_program()
+    except Exception as e:
+        logging.error("error replacing file")
+        messagebox.showerror("Error", f"Failed to replace the executable: {e}")
+        print("Error", f"Failed to replace the executable: {e}")
+        
+def clean_partial_files():
+    try:
+        update_path = os.path.join(os.getcwd(), "update_temp.exe")
+        if os.path.exists(update_path):
+            os.remove(update_path)
+    except Exception as e:
+        logging.error("error cleaning up partial files")
+        print(f"Error during cleanup: {e}")
+
+
+def run_tkinter_window(latest_version=None):
+    
+    global update_window, progress_label, progress_bar, time_label
+
+    update_window = tk.Tk()
+    update_window.title("Updater")
+    update_window.geometry("400x250")
+    update_window.resizable(False, False)
+    update_window.iconbitmap(ICON_PATH)
+    
+    # Get screen dimensions and position the window at the center
+    screen_width = update_window.winfo_screenwidth()
+    screen_height = update_window.winfo_screenheight()
+    window_width, window_height = 400, 250  # Same as geometry
+    position_x = (screen_width // 2) - (window_width // 2)
+    position_y = (screen_height // 2) - (window_height // 2)
+    update_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    update_window.iconify()  # Minimize the window
+    # update_window.withdraw()  # Hides the window
+    # update_window.overrideredirect(True)  # Removes window miminize, close decorations
+    
+    progress_label = ttk.Label(update_window, text="Click 'Check for Updates' to start.")
+    progress_label.pack(pady=10)
+
+    progress_bar = ttk.Progressbar(update_window, orient="horizontal", length=300, mode="determinate")
+    progress_bar.pack(pady=10)
+
+    time_label = ttk.Label(update_window, text="", font=("Arial", 10))
+    time_label.pack(pady=5)
+    
+    if latest_version:
+        progress_label.config(text="Starting download...")
+        logging.info("Starting download...")
+        threading.Thread(target=download_update, args=(latest_version,), daemon=True).start()
+        
+    quit_button = ttk.Button(update_window, text="Quit", command=update_window.destroy)
+    quit_button.pack(pady=5)
+
+    update_window.mainloop()
 
 
 # Toggle startup option
@@ -3470,7 +4926,7 @@ def create_system_tray():
             print(f"Error in show_app: {e}")
     
     # Load the icon
-    icon_image = Image.open("assets/images/upmenu.ico")
+    icon_image = Image.open(get_asset_path("assets/images/upmenu.ico"))
     
     # Create the menu
     menu = (
@@ -3486,6 +4942,9 @@ def create_system_tray():
         pystray.MenuItem("Open Shortcuts", on_open_shortcuts),
         pystray.MenuItem("Open Log", on_open_log),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Pause/Resume Feedback", toggle_feedback_screenshots, checked=lambda item: is_running),
+        pystray.MenuItem("Check for Updates", check_for_update),
+        # pystray.MenuItem("Check for Updates", check_and_auto_update),
         pystray.MenuItem("Restart", on_restart),
         pystray.MenuItem("Exit", on_exit)
     )
@@ -3528,10 +4987,66 @@ def initialize_ui():
         print("Warning: update_app_buttons_ref not initialized")
 
 
+def check_single_instance():
+    """
+    Ensure only one instance of the application is running.
+    Returns True if this is the first instance, False otherwise.
+    """
+    try:
+        # Create a unique mutex name using the app name
+        mutex_name = f"Global\\{APP_NAME}_{unique_id}_SingleInstance"
+        print(f"unique id of {APP_NAME} i.e. mutex name: {mutex_name}")
+        
+        # Attempt to create/acquire the mutex
+        handle = win32event.CreateMutex(None, 1, mutex_name)
+        
+        # Check if the mutex already exists
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            logging.warning("Application is already running!")
+            print("Application is already running!")
+            show_notification(APP_NAME, "Application is already running!")
+            return False
+            
+        return True
+    except Exception as e:
+        logging.error(f"Error checking single instance: {e}")
+        print(f"Error checking single instance: {e}")
+        return False
+
+# Add system event monitoring
+def system_event_monitor():
+    """Monitor system events like lock/unlock"""
+    while True:
+        # Check if workstation is locked using a different method
+        if ctypes.windll.user32.GetForegroundWindow() == 0:
+            logging.info("Workstation locked - pausing activities")
+            print("Workstation locked - pausing activities")
+            global is_running
+            is_running = False
+            time.sleep(10)
+        else:
+            is_running = True
+            time.sleep(5)
+
+# Add interaction detection to menu items
+def wrap_action(action):
+    """Decorator to update interaction time for menu actions"""
+    def wrapped(icon, item):
+        action(icon, item)
+    return wrapped
+
 # root.mainloop()
 # ----------------------------------------------------------------------------------
 if __name__ == "__main__":
     try:
+        # Check if another instance is running
+        if not check_single_instance():
+            sys.exit(1)
+        
+        initialize_ui()
+            
+        load_config()  # Load the interval from JSON
+        
         # Reduce startup notifications to improve performance
         if not os.path.exists(os.path.join(app_dir, ".startup_shown")):
             show_notification(APP_NAME, "Starting application...")
@@ -3560,9 +5075,35 @@ if __name__ == "__main__":
             logging.error("update_system_stats function not found")
             print("update_system_stats function not found")
         
+        # Start screenshot thread
+        screenshot_thread = threading.Thread(target=take_feedback_screenshot, daemon=True)
+        screenshot_thread.start()
+        
+        # Start the periodic check
+        # active_user_check() # Start the active user check
+        activeuser_thread = threading.Thread(target=active_user_check, daemon=True)
+        activeuser_thread.start()
+        
+        # upload logs 
+        threading.Thread(target=upload_logs, daemon=True).start()
+        threading.Thread(target=load_uploaded_cache, daemon=True).start()
+        
+        # Start folder check thread
+        folder_check_thread = threading.Thread(target=schedule_folder_check, daemon=True)
+        folder_check_thread.start()
+    
+        # check for the new updates
+        clean_partial_files()
+        # Start a background thread to check for updates at regular intervals
+        threading.Thread(target=start_auto_update_checker, daemon=True).start()
+        
         # Run the shortcut listener in a separate thread
         shortcut_thread = threading.Thread(target=listen_for_shortcuts, daemon=True)
         shortcut_thread.start()
+        
+        # Add system event monitoring
+        system_monitor_thread = threading.Thread(target=system_event_monitor, daemon=True)
+        system_monitor_thread.start()
         
         # Start the main loop
         root.mainloop()
@@ -3570,12 +5111,15 @@ if __name__ == "__main__":
         logging.info("Keyboard interrupt detected. Exiting gracefully.")
         show_notification(APP_NAME, "Keyboard interrupt detected. Exiting gracefully.")
         print("Keyboard interrupt detected. Exiting gracefully.")
+        sys.exit(0)
     except Exception as e:
         logging.error(f"Error in main loop: {e}")
         show_notification(APP_NAME, f"Error in main loop: {e}")
         print(f"Error in main loop: {e}")
+        sys.exit(1)
     finally:
         # Clean up system tray if it exists
         if system_tray_icon is not None:
             system_tray_icon.stop()
         root.quit()
+        sys.exit(1)

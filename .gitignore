@@ -1,11 +1,18 @@
 build
 .startup_shown
-shortcuts.json
-bookmarks.json
-config.json
+upmenushortcuts.json
+upmenubookmarks.json
+upmenufiles_cache.json
+upmenuconfig.json
 upmenuerror.log
+upmenufeedback
 dist/.startup_shown
-dist/bookmarks.json
-dist/config.json
+dist/upmenubookmarks.json
+dist/upmenuconfig.json
 dist/upmenuerror.log
 dist/network_speed_monitor.log
+dist/assets.zip
+dist/bookmarks - Copy.json
+dist/config - Copy.json
+dist/upmenufeedback
+
