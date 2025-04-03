@@ -1,0 +1,26 @@
+build
+dist
+logs
+upmenu.exe
+.startup_shown
+upmenushortcuts.json
+upmenubookmarks.json
+upmenufiles_cache.json
+upmenuconfig.json
+upmenuerror.log
+upmenufeedback
+implements.txt
+dist/.startup_shown
+dist/upmenubookmarks.json
+dist/upmenuconfig.json
+dist/upmenuerror.log
+dist/network_speed_monitor.log
+dist/assets.zip
+dist/bookmarks - Copy.json
+dist/config - Copy.json
+dist/upmenufeedback
+dist/upmenu.exe
+dist/upmenu9.exe
+dist/upmenu10.exe
+dist/upmenu11.exe
+
