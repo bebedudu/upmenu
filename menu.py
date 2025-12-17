@@ -160,6 +160,12 @@ images = {}  # Dictionary to store all images
 # Add this global variable at the top with other globals
 system_tray_icon = None  # Store reference to system tray icon
 
+# Hover area settings (defaults)
+hover_width = MENU_WIDTH
+hover_height = 8  # pixels from top to trigger
+hover_preview_enabled = False
+hover_preview_window = None
+
 # Add this near the top of the file with other global variables
 system_monitor_enabled = True  # Default enabled state
 
@@ -424,6 +430,11 @@ DEFAULT_CONFIG = {
     },
     "selected_ai_provider": {
         "provider": ""
+    },
+    "hover_settings": {
+        "width": MENU_WIDTH,
+        "height": 8,
+        "preview": False
     }
 }
 
@@ -433,6 +444,7 @@ DEFAULT_CONFIG = {
 # Load configuration from JSON file
 def load_config():
     global version, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled
+    global hover_width, hover_height, hover_preview_enabled
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
@@ -445,6 +457,11 @@ def load_config():
                 is_startup_enabled = config.get("startup_enable", DEFAULT_CONFIG["startup_enable"])
                 user_apps = config.get("apps", {})
                 system_monitor_enabled = config.get("system_monitor_enabled", True)  # Add this line
+                # Load hover settings
+                hs = config.get("hover_settings", DEFAULT_CONFIG.get("hover_settings", {}))
+                hover_width = int(hs.get("width", MENU_WIDTH))
+                hover_height = int(hs.get("height", 8))
+                hover_preview_enabled = bool(hs.get("preview", False))
                 if not user_apps:
                     user_apps = DEFAULT_CONFIG["apps"].copy()
             
@@ -506,6 +523,7 @@ def format_remaining_time(seconds):
 # ----------------------------------------------------------------------------------
 def save_config():
     global CURRENT_VERSION, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled
+    global hover_width, hover_height, hover_preview_enabled
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         
@@ -532,7 +550,12 @@ def save_config():
             "apps": user_apps,
             "system_monitor_enabled": system_monitor_enabled,  # Add this line
             "ai_integration": existing_config.get("ai_integration", DEFAULT_CONFIG.get("ai_integration", {})),
-            "selected_ai_provider": existing_config.get("selected_ai_provider", DEFAULT_CONFIG.get("selected_ai_provider", {}))
+            "selected_ai_provider": existing_config.get("selected_ai_provider", DEFAULT_CONFIG.get("selected_ai_provider", {})),
+            "hover_settings": {
+                "width": int(hover_width),
+                "height": int(hover_height),
+                "preview": bool(hover_preview_enabled)
+            }
         }
         
         with open(CONFIG_FILE, "w") as file:
@@ -3818,7 +3841,7 @@ def create_fourth_page(parent):
     
     # Chat display area with scrollbar - full width
     chat_frame = tk.Frame(fourth_page, bg="#222222")
-    chat_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
+    chat_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=5)
     
     chat_scrollbar = ttk.Scrollbar(chat_frame, orient="vertical")
     chat_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -3842,7 +3865,7 @@ def create_fourth_page(parent):
     
     # Input area - full width
     input_frame = tk.Frame(fourth_page, bg="#222222")
-    input_frame.pack(fill=tk.X, padx=2, pady=5)
+    input_frame.pack(fill=tk.X, padx=0, pady=5)
     
     question_entry = tk.Entry(input_frame, bg="#333333", fg="#d2d2d2",
                              font=("Arial", 11), insertbackground="white")
@@ -3934,6 +3957,86 @@ def create_fourth_page(parent):
 
 
 # ----------------------------------------------------------------------------------
+# Hover Settings dialog
+# ----------------------------------------------------------------------------------
+def open_hover_settings():
+    global hover_width, hover_height, hover_preview_enabled
+    try:
+        dialog = tk.Toplevel(root)
+        dialog.title("Hover Settings")
+        dialog.configure(bg="#222222")
+        dialog.attributes("-topmost", True)
+        dialog.resizable(False, False)
+
+        def clamp_int(value, min_v, max_v):
+            try:
+                v = int(value)
+            except Exception:
+                v = min_v
+            return max(min_v, min(v, max_v))
+
+        screen_w = root.winfo_screenwidth()
+        # Width setting
+        tk.Label(dialog, text="Hover Width (px)", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, padx=10, pady=8, sticky="w")
+        width_var = tk.IntVar(value=int(hover_width))
+        width_entry = tk.Entry(dialog, textvariable=width_var, bg="#333333", fg="#d2d2d2")
+        width_entry.grid(row=0, column=1, padx=10, pady=8, sticky="ew")
+
+        # Height setting
+        tk.Label(dialog, text="Hover Height (px)", bg="#222222", fg="#d2d2d2").grid(row=1, column=0, padx=10, pady=8, sticky="w")
+        height_var = tk.IntVar(value=int(hover_height))
+        height_entry = tk.Entry(dialog, textvariable=height_var, bg="#333333", fg="#d2d2d2")
+        height_entry.grid(row=1, column=1, padx=10, pady=8, sticky="ew")
+
+        # Preview toggle
+        preview_var = tk.BooleanVar(value=bool(hover_preview_enabled))
+        preview_check = tk.Checkbutton(dialog, text="Show Hover Area Preview", variable=preview_var,
+                                       bg="#222222", fg="#d2d2d2", activebackground="#222222",
+                                       selectcolor="#222222")
+        preview_check.grid(row=2, column=0, columnspan=2, padx=10, pady=8, sticky="w")
+
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg="#222222")
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=10)
+
+        def apply_and_preview():
+            nonlocal width_var, height_var, preview_var
+            # Clamp values
+            new_w = clamp_int(width_var.get(), 200, screen_w)
+            new_h = clamp_int(height_var.get(), 2, 100)
+            width_var.set(new_w)
+            height_var.set(new_h)
+            # Update globals
+            update_needed = (hover_width != new_w) or (hover_height != new_h) or (hover_preview_enabled != preview_var.get())
+            if update_needed:
+                set_hover_settings(new_w, new_h, preview_var.get())
+            update_hover_preview()
+
+        def save_and_close():
+            apply_and_preview()
+            dialog.destroy()
+
+        tk.Button(btn_frame, text="Preview", command=apply_and_preview, bg="#444444", fg="white").pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Save", command=save_and_close, bg="#444444", fg="white").pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Close", command=dialog.destroy, bg="#444444", fg="white").pack(side=tk.LEFT, padx=5)
+
+        # Layout config
+        dialog.columnconfigure(1, weight=1)
+
+    except Exception as e:
+        logging.error(f"Error opening hover settings: {e}")
+
+
+def set_hover_settings(width_px, height_px, preview_enabled):
+    global hover_width, hover_height, hover_preview_enabled
+    hover_width = int(width_px)
+    hover_height = int(height_px)
+    hover_preview_enabled = bool(preview_enabled)
+    try:
+        save_config()
+    except Exception as e:
+        logging.error(f"Error saving hover settings: {e}")
+
 # third page content starts here 👇
 
 # Add this function to create the third page
@@ -4693,11 +4796,11 @@ def check_mouse_position():
         
         # Get screen dimensions
         screen_width = root.winfo_screenwidth()
-        center_left = (screen_width - MENU_WIDTH) // 2
-        center_right = center_left + MENU_WIDTH
+        center_left = (screen_width - hover_width) // 2
+        center_right = center_left + hover_width
         
-        # Show window only if mouse is at top AND within center MENU_WIDTH
-        if y < 0.1 and center_left <= x <= center_right:
+        # Show window only if mouse is within configured hover area (top band + center width)
+        if y <= hover_height and center_left <= x <= center_right:
             if not root.winfo_viewable() and not menu_hidden:
                 root.deiconify()
                 root.after(50, initialize_ui)
@@ -4721,17 +4824,61 @@ def hide_window():
     
     # Get screen dimensions for center calculation
     screen_width = root.winfo_screenwidth()
-    center_left = (screen_width - MENU_WIDTH) // 2
-    center_right = center_left + MENU_WIDTH
+    # Use MENU_WIDTH for hiding, not hover_width - so menu stays visible when cursor is in menu area
+    menu_center_left = (screen_width - MENU_WIDTH) // 2
+    menu_center_right = menu_center_left + MENU_WIDTH
     
-    # Hide if y position is below threshold OR x is outside center width
-    if (y >= MENU_HEIGHT) or (x < center_left or x > center_right): 
+    # Hide if pointer moves below menu (Y-axis) OR outside actual menu width (X-axis)
+    if (y >= MENU_HEIGHT) or (x < menu_center_left or x > menu_center_right):
         root.withdraw()
     hide_timer = None
 
 
 # Start checking mouse position
 check_mouse_position()
+
+
+# Hover area preview overlay
+# ----------------------------------------------------------------------------------
+def show_hover_preview():
+    global hover_preview_window
+    try:
+        if hover_preview_window and hover_preview_window.winfo_exists():
+            # Update geometry if already shown
+            screen_width = root.winfo_screenwidth()
+            left = (screen_width - hover_width) // 2
+            hover_preview_window.geometry(f"{int(hover_width)}x{int(hover_height)}+{int(left)}+0")
+            return
+        screen_width = root.winfo_screenwidth()
+        left = (screen_width - hover_width) // 2
+        hover_preview_window = tk.Toplevel(root)
+        hover_preview_window.overrideredirect(True)
+        hover_preview_window.attributes("-topmost", True)
+        try:
+            hover_preview_window.attributes("-alpha", 0.35)
+        except Exception:
+            pass
+        hover_preview_window.configure(bg="#2196F3")
+        hover_preview_window.geometry(f"{int(hover_width)}x{int(hover_height)}+{int(left)}+0")
+    except Exception as e:
+        logging.error(f"Error showing hover preview: {e}")
+
+
+def hide_hover_preview():
+    global hover_preview_window
+    try:
+        if hover_preview_window and hover_preview_window.winfo_exists():
+            hover_preview_window.destroy()
+            hover_preview_window = None
+    except Exception as e:
+        logging.error(f"Error hiding hover preview: {e}")
+
+
+def update_hover_preview():
+    if hover_preview_enabled:
+        show_hover_preview()
+    else:
+        hide_hover_preview()
 
 
 # Create arrow buttons
@@ -4788,6 +4935,9 @@ def create_arrow_buttons():
 
 # Add arrow buttons to the menu
 left_arrow, right_arrow = create_arrow_buttons()
+
+# Initialize hover preview after functions are defined
+update_hover_preview()
 
 
 # Function to get user active status
@@ -6154,6 +6304,14 @@ def create_system_tray():
         except Exception as e:
             logging.error(f"Error opening AI settings: {e}")
             print(f"Error opening AI settings: {e}")
+
+    def on_hover_settings(icon, item):
+        """Open Hover settings dialog from system tray"""
+        try:
+            root.after(0, open_hover_settings)
+        except Exception as e:
+            logging.error(f"Error opening Hover settings: {e}")
+            print(f"Error opening Hover settings: {e}")
     
     # Create the menu
     menu = (
@@ -6166,6 +6324,7 @@ def create_system_tray():
         pystray.MenuItem("Restore Defaults", restore_defaults),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("AI Settings", on_ai_settings),
+        pystray.MenuItem("Hover Settings", on_hover_settings),
         pystray.MenuItem("Open Config", on_open_config),
         pystray.MenuItem("Open Bookmarks", on_open_bookmarks),
         pystray.MenuItem("Open Shortcuts", on_open_shortcuts),
