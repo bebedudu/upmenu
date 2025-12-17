@@ -1,4 +1,5 @@
-# adding AI search
+# wmic and volume fixed
+
 import os
 import sys
 import wmi
@@ -41,34 +42,6 @@ from PIL import Image, ImageGrab, ImageTk
 from pynput.keyboard import Key, Controller
 from tkinter import messagebox, simpledialog
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, ISimpleAudioVolume
-
-# AI Integration imports
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    logging.warning("OpenAI library not available")
-
-try:
-    # Suppress deprecation warnings
-    import warnings
-    warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
-    
-    # Try old package (it's more stable and well-documented)
-    try:
-        import google.generativeai as genai
-        GEMINI_NEW_API = False
-    except ImportError:
-        # If old not available, try new
-        import google.genai as genai
-        GEMINI_NEW_API = True
-    
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    GEMINI_NEW_API = False
-    logging.warning("Google Generative AI library not available")
 
 # Image paths
 username = getpass.getuser() # get the current user name of PC
@@ -162,10 +135,10 @@ system_tray_icon = None  # Store reference to system tray icon
 
 # Add this near the top of the file with other global variables
 system_monitor_enabled = True  # Default enabled state
+ai_provider = "OpenAI"
+ai_api_key = ""
+page_indicator = None  # Store reference to page indicator
 
-# AI Chat global variables
-ai_chat_history = []  # Store chat history
-fourth_page_frame = None  # Add fourth page reference
 
 
 # function to get token number 
@@ -203,6 +176,90 @@ def get_token():
 # Call the function
 GITHUB_TOKEN = get_token()
 # print(f"Final Token: {GITHUB_TOKEN}")
+
+
+# AI Chat Function
+# ----------------------------------------------------------------------------------
+def chat_with_ai(message):
+    """
+    Send a message to the configured AI provider and return the response.
+    """
+    global ai_provider, ai_api_key
+    
+    if not ai_api_key:
+        return "Please configure the API Key in Settings (System Tray -> AI Settings)."
+
+    try:
+        if ai_provider == "OpenAI":
+            url = "https://api.openai.com/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {ai_api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": message}],
+                "max_tokens": 1000,
+                "temperature": 0.7
+            }
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'choices' in result and len(result['choices']) > 0:
+                    return result['choices'][0]['message']['content']
+                else:
+                    return "Error: No response from OpenAI"
+            elif response.status_code == 401:
+                return "Error: Invalid API key. Please check your OpenAI API key."
+            elif response.status_code == 429:
+                return "Error: Rate limit exceeded. Please try again later."
+            else:
+                return f"Error: {response.status_code} - {response.text}"
+
+        elif ai_provider == "Gemini":
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={ai_api_key}"
+            headers = {"Content-Type": "application/json"}
+            data = {
+                "contents": [{"parts": [{"text": message}]}],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 1000
+                }
+            }
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                try:
+                    if 'candidates' in result and len(result['candidates']) > 0:
+                        candidate = result['candidates'][0]
+                        if 'content' in candidate and 'parts' in candidate['content']:
+                            return candidate['content']['parts'][0]['text']
+                        else:
+                            return "Error: Content blocked by safety filters"
+                    else:
+                        return "Error: No response from Gemini"
+                except (KeyError, IndexError) as e:
+                    return f"Error parsing Gemini response: {str(e)}"
+            elif response.status_code == 400:
+                return "Error: Invalid API key or request. Please check your Gemini API key."
+            elif response.status_code == 429:
+                return "Error: Rate limit exceeded. Please try again later."
+            else:
+                return f"Error: {response.status_code} - {response.text}"
+        
+        else:
+            return "Error: Invalid Provider Selected. Please choose OpenAI or Gemini."
+
+    except requests.exceptions.Timeout:
+        return "Error: Request timed out. Please try again."
+    except requests.exceptions.ConnectionError:
+        return "Error: Connection failed. Please check your internet connection."
+    except Exception as e:
+        logging.error(f"AI Chat Error: {e}")
+        return f"An error occurred: {str(e)}"
+
 
 
 # Determine the application directory for logging error
@@ -383,6 +440,7 @@ def get_windows_uuid():
         logging.warning(f"Failed to get BIOS UUID: {e}")
         print(f"Failed to get BIOS UUID: {e}")
         return get_mac_address()  # Fallback to MAC address if BIOS UUID retrieval fails
+
 # Function to get the MAC address (used if BIOS UUID retrieval fails)
 def get_mac_address():
     try:
@@ -416,15 +474,8 @@ DEFAULT_CONFIG = {
         "Notepad": "notepad.exe",
         "Explorer": "explorer.exe"
     },
-    "ai_integration": {
-        "ai_provider_1": "",
-        "ai_api_key_1": "",
-        "ai_provider_2": "",
-        "ai_api_key_2": ""
-    },
-    "selected_ai_provider": {
-        "provider": ""
-    }
+    "ai_provider": "OpenAI",
+    "ai_api_key": ""
 }
 
 
@@ -432,7 +483,7 @@ DEFAULT_CONFIG = {
 # ----------------------------------------------------------------------------------
 # Load configuration from JSON file
 def load_config():
-    global version, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled
+    global version, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled, ai_provider, ai_api_key
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
@@ -445,6 +496,8 @@ def load_config():
                 is_startup_enabled = config.get("startup_enable", DEFAULT_CONFIG["startup_enable"])
                 user_apps = config.get("apps", {})
                 system_monitor_enabled = config.get("system_monitor_enabled", True)  # Add this line
+                ai_provider = config.get("ai_provider", DEFAULT_CONFIG["ai_provider"])
+                ai_api_key = config.get("ai_api_key", DEFAULT_CONFIG["ai_api_key"])
                 if not user_apps:
                     user_apps = DEFAULT_CONFIG["apps"].copy()
             
@@ -505,19 +558,9 @@ def format_remaining_time(seconds):
 # Save configuration to JSON file
 # ----------------------------------------------------------------------------------
 def save_config():
-    global CURRENT_VERSION, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled
+    global CURRENT_VERSION, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled, ai_provider, ai_api_key
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        
-        # Load existing config to preserve AI settings
-        existing_config = {}
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r") as f:
-                    existing_config = json.load(f)
-            except:
-                pass
-        
         config = {
             "version": CURRENT_VERSION,  # Save the version
             "screenshot_interval": screenshot_interval,
@@ -531,8 +574,8 @@ def save_config():
             "startup_enable": is_startup_enabled,
             "apps": user_apps,
             "system_monitor_enabled": system_monitor_enabled,  # Add this line
-            "ai_integration": existing_config.get("ai_integration", DEFAULT_CONFIG.get("ai_integration", {})),
-            "selected_ai_provider": existing_config.get("selected_ai_provider", DEFAULT_CONFIG.get("selected_ai_provider", {}))
+            "ai_provider": ai_provider,
+            "ai_api_key": ai_api_key
         }
         
         with open(CONFIG_FILE, "w") as file:
@@ -710,43 +753,23 @@ class AudioController:
         return cls._instance
     
     def __init__(self):
-        # Always try to initialize if not available
-        if not AudioController._initialized or not self.is_available():
+        if not AudioController._initialized:
             self._init_audio()
             AudioController._initialized = True
     
     def _init_audio(self):
         try:
-            devices = AudioUtilities.GetSpeakers()
-            if devices:
-                # Handle both old and new pycaw API
-                if hasattr(devices, 'Activate'):
-                    # Old API
-                    self.interface = devices.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, '_dev') and hasattr(devices._dev, 'Activate'):
-                    # New API - access underlying device
-                    self.interface = devices._dev.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, 'activate'):
-                    # Alternative new API
-                    self.interface = devices.activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                else:
-                    raise Exception("Cannot activate audio endpoint - unsupported pycaw version")
-                
+            self.devices = AudioUtilities.GetSpeakers()
+            if self.devices:
+                self.interface = self.devices.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 self.volume = cast(self.interface, POINTER(IAudioEndpointVolume))
-                self.devices = devices
-                
-                # Test if it actually works
-                test = self.volume.GetMasterVolumeLevelScalar()
-                logging.info(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
-                print(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
+                # Register cleanup with atexit
+                atexit.register(self._cleanup)
             else:
                 raise Exception("No audio devices found")
         except Exception as e:
-            logging.warning(f"Audio device not available: {e}")
-            print(f"Audio device not available: {e}")
+            logging.error(f"Error initializing audio controller: {e}")
             self.devices = None
             self.interface = None
             self.volume = None
@@ -760,7 +783,7 @@ class AudioController:
     
     def is_available(self):
         """Check if audio controller is properly initialized"""
-        return hasattr(self, 'volume') and self.volume is not None
+        return self.volume is not None
 
 
 # ----------------------------------------------------------------------------------
@@ -786,7 +809,8 @@ def mute_speakers():
         else:
             show_notification(APP_NAME, "Audio device not available")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error muting speakers: {e}")
+        print(f"Error muting speakers: {e}")
 
 def unmute_speakers():
     try:
@@ -798,7 +822,8 @@ def unmute_speakers():
         else:
             show_notification(APP_NAME, "Audio device not available")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error unmuting speakers: {e}")
+        print(f"Error unmuting speakers: {e}")
 
 def shut_down():
     try:
@@ -3582,358 +3607,6 @@ def create_second_page(parent):
 
 
 # ----------------------------------------------------------------------------------
-# AI Integration Functions
-# ----------------------------------------------------------------------------------
-
-def load_ai_config():
-    """Load AI configuration from config file"""
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-            return config.get("ai_integration", {}), config.get("selected_ai_provider", {})
-    except Exception as e:
-        logging.error(f"Error loading AI config: {e}")
-        return {}, {}
-
-def save_ai_config(ai_integration, selected_provider):
-    """Save AI configuration to config file"""
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-        
-        config["ai_integration"] = ai_integration
-        config["selected_ai_provider"] = selected_provider
-        
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=4)
-        
-        logging.info("AI configuration saved successfully")
-        return True
-    except Exception as e:
-        logging.error(f"Error saving AI config: {e}")
-        return False
-
-def call_openai_api(prompt, api_key):
-    """Call OpenAI API and return response"""
-    if not OPENAI_AVAILABLE:
-        return "OpenAI library is not installed. Please install it using: pip install openai"
-    
-    try:
-        openai.api_key = api_key
-        client = openai.OpenAI(api_key=api_key)
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant. Provide clear, concise answers without using markdown formatting."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        logging.error(f"OpenAI API error: {e}")
-        return f"Error: {str(e)}"
-
-def call_gemini_api(prompt, api_key):
-    """Call Gemini API and return response"""
-    if not GEMINI_AVAILABLE:
-        return "Google Generative AI library is not installed. Please install it using: pip install google-generativeai"
-    
-    try:
-        # Configure based on API version
-        genai.configure(api_key=api_key)
-        
-        # Try different model names in order of preference
-        model_names = ['gemini-2.5-pro', 'gemini-pro-latest', 'gemini-2.5-flash']
-        
-        response = None
-        last_error = None
-        
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                break  # Success, exit loop
-            except Exception as model_error:
-                last_error = model_error
-                continue
-        
-        if response:
-            # Return plain text without markdown
-            return response.text
-        else:
-            raise last_error if last_error else Exception("No models available")
-            
-    except Exception as e:
-        logging.error(f"Gemini API error: {e}")
-        return f"Error: {str(e)}"
-
-def get_ai_response(prompt):
-    """Get AI response based on selected provider"""
-    ai_config, selected_provider = load_ai_config()
-    provider = selected_provider.get("provider", "")
-    
-    if not provider:
-        return "Please configure AI provider in settings (System Tray -> Settings)"
-    
-    # Find the API key for the selected provider
-    api_key = None
-    for i in range(1, 3):
-        if ai_config.get(f"ai_provider_{i}") == provider:
-            api_key = ai_config.get(f"ai_api_key_{i}")
-            break
-    
-    if not api_key:
-        return f"API key not found for {provider}. Please configure it in settings."
-    
-    if provider == "OpenAI":
-        return call_openai_api(prompt, api_key)
-    elif provider == "Gemini":
-        return call_gemini_api(prompt, api_key)
-    else:
-        return f"Unknown provider: {provider}"
-
-def open_ai_settings():
-    """Open AI settings dialog"""
-    settings_window = tk.Toplevel(root)
-    settings_window.title("AI Settings")
-    settings_window.geometry("500x400")
-    settings_window.configure(bg="#222222")
-    settings_window.iconbitmap(ICON_PATHH)
-    
-    # Center the window
-    screen_width = settings_window.winfo_screenwidth()
-    screen_height = settings_window.winfo_screenheight()
-    x = (screen_width // 2) - 250
-    y = (screen_height // 2) - 200
-    settings_window.geometry(f"500x400+{x}+{y}")
-    
-    # Load current config
-    ai_config, selected_provider = load_ai_config()
-    
-    # Title
-    title_label = tk.Label(settings_window, text="AI Provider Settings",
-                          font=("Arial", 16, "bold"), fg="#d2d2d2", bg="#222222")
-    title_label.pack(pady=10)
-    
-    # Provider 1 Frame
-    provider1_frame = tk.LabelFrame(settings_window, text="Provider 1",
-                                   bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    provider1_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(provider1_frame, text="Provider:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    provider1_var = tk.StringVar(value=ai_config.get("ai_provider_1", ""))
-    provider1_combo = ttk.Combobox(provider1_frame, textvariable=provider1_var, values=["OpenAI", "Gemini"], state="readonly", width=30)
-    provider1_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    tk.Label(provider1_frame, text="API Key:", bg="#222222", fg="#d2d2d2").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    api_key1_entry = tk.Entry(provider1_frame, bg="#333333", fg="#d2d2d2", show="*", width=33, insertbackground="white")
-    api_key1_entry.insert(0, ai_config.get("ai_api_key_1", ""))
-    api_key1_entry.grid(row=1, column=1, padx=5, pady=5)
-    
-    # Provider 2 Frame
-    provider2_frame = tk.LabelFrame(settings_window, text="Provider 2",
-                                   bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    provider2_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(provider2_frame, text="Provider:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    provider2_var = tk.StringVar(value=ai_config.get("ai_provider_2", ""))
-    provider2_combo = ttk.Combobox(provider2_frame, textvariable=provider2_var, values=["OpenAI", "Gemini"], state="readonly", width=30)
-    provider2_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    tk.Label(provider2_frame, text="API Key:", bg="#222222", fg="#d2d2d2").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    api_key2_entry = tk.Entry(provider2_frame, bg="#333333", fg="#d2d2d2", show="*", width=33, insertbackground="white")
-    api_key2_entry.insert(0, ai_config.get("ai_api_key_2", ""))
-    api_key2_entry.grid(row=1, column=1, padx=5, pady=5)
-    
-    # Selected Provider Frame
-    selected_frame = tk.LabelFrame(settings_window, text="Active Provider",
-                                  bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    selected_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(selected_frame, text="Select Active:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    selected_var = tk.StringVar(value=selected_provider.get("provider", ""))
-    
-    def update_selected_options(*args):
-        providers = []
-        if provider1_var.get():
-            providers.append(provider1_var.get())
-        if provider2_var.get():
-            providers.append(provider2_var.get())
-        selected_combo['values'] = providers
-    
-    selected_combo = ttk.Combobox(selected_frame, textvariable=selected_var, state="readonly", width=30)
-    selected_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    # Bind provider changes to update selected options
-    provider1_var.trace_add("write", update_selected_options)
-    provider2_var.trace_add("write", update_selected_options)
-    update_selected_options()
-    
-    def save_settings():
-        new_ai_config = {
-            "ai_provider_1": provider1_var.get(),
-            "ai_api_key_1": api_key1_entry.get(),
-            "ai_provider_2": provider2_var.get(),
-            "ai_api_key_2": api_key2_entry.get()
-        }
-        
-        new_selected = {
-            "provider": selected_var.get()
-        }
-        
-        if save_ai_config(new_ai_config, new_selected):
-            show_notification(APP_NAME, "AI settings saved successfully")
-            settings_window.destroy()
-        else:
-            messagebox.showerror("Error", "Failed to save settings")
-    
-    # Buttons
-    button_frame = tk.Frame(settings_window, bg="#222222")
-    button_frame.pack(pady=20)
-    
-    save_btn = tk.Button(button_frame, text="Save", command=save_settings,
-                        bg="#444444", fg="white", width=10)
-    save_btn.pack(side=tk.LEFT, padx=5)
-    
-    cancel_btn = tk.Button(button_frame, text="Cancel", command=settings_window.destroy,
-                          bg="#444444", fg="white", width=10)
-    cancel_btn.pack(side=tk.LEFT, padx=5)
-
-
-# ----------------------------------------------------------------------------------
-# fourth page - AI Chat
-# ----------------------------------------------------------------------------------
-
-def create_fourth_page(parent):
-    """Create the fourth page with AI chat interface"""
-    global ai_chat_history
-    
-    fourth_page = tk.Frame(parent, bg="#222222")
-    
-    # Create a context menu for the page
-    context_menu = create_context_menu(fourth_page)
-    fourth_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
-    
-    # Chat display area with scrollbar - full width
-    chat_frame = tk.Frame(fourth_page, bg="#222222")
-    chat_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
-    
-    chat_scrollbar = ttk.Scrollbar(chat_frame, orient="vertical")
-    chat_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
-    chat_display = tk.Text(chat_frame, bg="#333333", fg="#d2d2d2",
-                          font=("Arial", 10), wrap=tk.WORD, height=5,
-                          yscrollcommand=chat_scrollbar.set, state=tk.DISABLED,
-                          padx=10, pady=5)
-    chat_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    chat_scrollbar.config(command=chat_display.yview)
-    
-    # Add welcome message
-    chat_display.config(state=tk.NORMAL)
-    chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
-    chat_display.config(state=tk.DISABLED)
-    
-    # Configure tags for different message types
-    chat_display.tag_config("user", foreground="#4CAF50", font=("Arial", 10, "bold"))
-    chat_display.tag_config("ai", foreground="#2196F3", font=("Arial", 10, "bold"))
-    chat_display.tag_config("error", foreground="#f44336")
-    
-    # Input area - full width
-    input_frame = tk.Frame(fourth_page, bg="#222222")
-    input_frame.pack(fill=tk.X, padx=2, pady=5)
-    
-    question_entry = tk.Entry(input_frame, bg="#333333", fg="#d2d2d2",
-                             font=("Arial", 11), insertbackground="white")
-    question_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5), ipady=3)
-    question_entry.insert(0, "Ask me anything...")
-    question_entry.config(fg="grey")
-    
-    def on_entry_focus_in(event):
-        if question_entry.get() == "Ask me anything...":
-            question_entry.delete(0, tk.END)
-            question_entry.config(fg="#d2d2d2")
-    
-    def on_entry_focus_out(event):
-        if not question_entry.get():
-            question_entry.insert(0, "Ask me anything...")
-            question_entry.config(fg="grey")
-    
-    question_entry.bind("<FocusIn>", on_entry_focus_in)
-    question_entry.bind("<FocusOut>", on_entry_focus_out)
-    
-    def send_message():
-        question = question_entry.get().strip()
-        if not question or question == "Ask me anything...":
-            return
-        
-        # Clear input
-        question_entry.delete(0, tk.END)
-        
-        # Add user message to chat
-        chat_display.config(state=tk.NORMAL)
-        chat_display.insert(tk.END, "You: ", "user")
-        chat_display.insert(tk.END, f"{question}\n\n")
-        chat_display.config(state=tk.DISABLED)
-        chat_display.see(tk.END)
-        
-        # Show "thinking" message
-        chat_display.config(state=tk.NORMAL)
-        chat_display.insert(tk.END, "AI: ", "ai")
-        thinking_start = chat_display.index(tk.END)
-        chat_display.insert(tk.END, "Thinking...\n\n")
-        chat_display.config(state=tk.DISABLED)
-        chat_display.see(tk.END)
-        
-        def get_response():
-            try:
-                response = get_ai_response(question)
-                
-                # Remove "Thinking..." message
-                chat_display.config(state=tk.NORMAL)
-                chat_display.delete(thinking_start, tk.END)
-                
-                # Add AI response
-                chat_display.insert(tk.END, f"{response}\n\n")
-                chat_display.config(state=tk.DISABLED)
-                chat_display.see(tk.END)
-                
-                # Store in history
-                ai_chat_history.append({"user": question, "ai": response})
-            except Exception as e:
-                chat_display.config(state=tk.NORMAL)
-                chat_display.delete(thinking_start, tk.END)
-                chat_display.insert(tk.END, f"Error: {str(e)}\n\n", "error")
-                chat_display.config(state=tk.DISABLED)
-                chat_display.see(tk.END)
-        
-        # Run in thread to avoid blocking UI
-        threading.Thread(target=get_response, daemon=True).start()
-    
-    # Clear button function
-    def clear_chat():
-        global ai_chat_history
-        ai_chat_history = []
-        chat_display.config(state=tk.NORMAL)
-        chat_display.delete(1.0, tk.END)
-        chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
-        chat_display.config(state=tk.DISABLED)
-    
-    send_btn = tk.Button(input_frame, text="Send", command=send_message,
-                        bg="#444444", fg="white", width=8)
-    send_btn.pack(side=tk.LEFT, padx=(0, 5))
-    
-    clear_btn = tk.Button(input_frame, text="Clear Chat", command=clear_chat,
-                         bg="#444444", fg="white", width=10)
-    clear_btn.pack(side=tk.LEFT)
-    
-    question_entry.bind("<Return>", lambda e: send_message())
-    
-    return fourth_page
-
-
-# ----------------------------------------------------------------------------------
 # third page content starts here 👇
 
 # Add this function to create the third page
@@ -3972,6 +3645,148 @@ def create_third_page(parent):
     subtitle_label.pack(pady=10)
     
     return third_page
+
+def create_fourth_page(parent):
+    """Create the AI Chat page"""
+    fourth_page = tk.Frame(parent, bg="#222222")
+    
+    # Create a context menu for the page
+    context_menu = create_context_menu(fourth_page)
+    # Bind right-click to show the context menu
+    fourth_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
+    
+    # Header with AI provider info
+    header_frame = tk.Frame(fourth_page, bg="#222222")
+    header_frame.pack(fill=tk.X, padx=10, pady=5)
+    
+    lbl_title = tk.Label(header_frame, text="AI Conversation", bg="#222222", fg="white", font=("Arial", 12, "bold"))
+    lbl_title.pack(side=tk.LEFT)
+    
+    # Show current AI provider
+    provider_label = tk.Label(header_frame, text=f"Provider: {ai_provider}", bg="#222222", fg="lightgray", font=("Arial", 9))
+    provider_label.pack(side=tk.RIGHT)
+
+    # Chat History
+    history_frame = tk.Frame(fourth_page, bg="#222222")
+    history_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=(5, 0))
+    
+    chat_history = tk.Text(history_frame, bg="#333333", fg="#d2d2d2", font=("Arial", 10), 
+                          wrap=tk.WORD, state=tk.DISABLED, bd=0, insertbackground="white")
+    scrollbar = ttk.Scrollbar(history_frame, command=chat_history.yview)
+    chat_history.configure(yscrollcommand=scrollbar.set)
+    
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    chat_history.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    
+    # Tags for styling
+    chat_history.tag_config("user", foreground="#87CEEB", justify="left")  # Sky blue
+    chat_history.tag_config("ai", foreground="#90EE90", justify="left")    # Light green
+    chat_history.tag_config("error", foreground="#FF6B6B", justify="center")  # Light red
+    chat_history.tag_config("system", foreground="#FFD700", justify="center")  # Gold
+
+    # Input Area - Pack at bottom with explicit positioning
+    input_frame = tk.Frame(fourth_page, bg="#444444", relief=tk.RAISED, bd=1)
+    input_frame.pack(fill=tk.X, padx=10, pady=5, side=tk.BOTTOM)
+    
+    # Add placeholder text functionality
+    placeholder_text = "Ask me anything..."
+    input_entry = tk.Entry(input_frame, bg="#333333", fg="gray", font=("Arial", 12), 
+                          bd=0, insertbackground="white")
+    input_entry.insert(0, placeholder_text)
+    input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=5, ipady=8)
+    
+    def on_entry_click(event):
+        if input_entry.get() == placeholder_text:
+            input_entry.delete(0, tk.END)
+            input_entry.config(fg="white")
+
+    def on_focusout(event):
+        if input_entry.get() == '':
+            input_entry.insert(0, placeholder_text)
+            input_entry.config(fg="gray")
+    
+    input_entry.bind('<FocusIn>', on_entry_click)
+    input_entry.bind('<FocusOut>', on_focusout)
+    
+    send_btn = tk.Button(input_frame, text="Send", bg="#4CAF50", fg="white", 
+                        font=("Arial", 10), bd=0, cursor="hand2", padx=15, pady=5)
+    send_btn.pack(side=tk.RIGHT, padx=5, pady=5)
+    
+    # Clear chat button
+    clear_btn = tk.Button(input_frame, text="Clear", bg="#f44336", fg="white", 
+                         font=("Arial", 10), bd=0, cursor="hand2", padx=10, pady=5)
+    clear_btn.pack(side=tk.RIGHT, padx=5, pady=5)
+
+    def append_message(sender, message, tag):
+        chat_history.config(state=tk.NORMAL)
+        timestamp = datetime.now().strftime("%H:%M")
+        if sender:
+            chat_history.insert(tk.END, f"[{timestamp}] {sender}:\n", tag)
+        chat_history.insert(tk.END, f"{message}\n\n", tag)
+        chat_history.config(state=tk.DISABLED)
+        chat_history.see(tk.END)
+
+    def handle_send(event=None):
+        msg = input_entry.get().strip()
+        if not msg or msg == placeholder_text:
+            return
+            
+        input_entry.delete(0, tk.END)
+        input_entry.config(fg="white")
+        append_message("You", msg, "user")
+        
+        # Check if API key is configured
+        if not ai_api_key:
+            append_message("System", "Please configure your API key in Settings (System Tray -> AI Settings)", "error")
+            return
+        
+        # Disable input while processing
+        input_entry.config(state=tk.DISABLED)
+        send_btn.config(state=tk.DISABLED, text="Thinking...")
+        
+        def run_ai():
+            try:
+                response = chat_with_ai(msg)
+                # Schedule UI update on main thread
+                fourth_page.after(0, lambda: process_response(response))
+            except Exception as e:
+                fourth_page.after(0, lambda: process_response(f"Error: {str(e)}"))
+            
+        threading.Thread(target=run_ai, daemon=True).start()
+
+    def process_response(response):
+        if response.startswith("Error:"):
+            append_message("System", response, "error")
+        else:
+            append_message("AI", response, "ai")
+        
+        input_entry.config(state=tk.NORMAL)
+        send_btn.config(state=tk.NORMAL, text="Send")
+        input_entry.focus()
+    
+    def clear_chat():
+        chat_history.config(state=tk.NORMAL)
+        chat_history.delete(1.0, tk.END)
+        chat_history.config(state=tk.DISABLED)
+        append_message("System", "Chat cleared", "system")
+
+    send_btn.config(command=handle_send)
+    clear_btn.config(command=clear_chat)
+    input_entry.bind("<Return>", handle_send)
+    
+    # Add welcome message
+    def show_welcome():
+        welcome_msg = f"Welcome to AI Chat! Current provider: {ai_provider}\n"
+        if not ai_api_key:
+            welcome_msg += "Please configure your API key in System Tray -> AI Settings to start chatting."
+        else:
+            welcome_msg += "You can start asking questions now!"
+        append_message("System", welcome_msg, "system")
+    
+    # Show welcome message after a short delay
+    fourth_page.after(100, show_welcome)
+    
+    return fourth_page
 
 
 # Initialize pages
@@ -4734,12 +4549,14 @@ def hide_window():
 check_mouse_position()
 
 
-# Create arrow buttons
+# Create arrow buttons and page indicator
 # ----------------------------------------------------------------------------------
 def create_arrow_buttons():
+    page_names = ["Main", "Apps", "Coming Soon", "AI Chat"]
+    
     def switch_page(direction):
         global current_page
-        pages = [main_page_frame, second_page_frame, fourth_page_frame, third_page_frame]  # AI chat on page 3, Coming Soon on page 4
+        pages = [main_page_frame, second_page_frame, third_page_frame, fourth_page_frame]
         total_pages = len(pages)
         
         if direction == "right":
@@ -4751,8 +4568,14 @@ def create_arrow_buttons():
         for page in pages:
             page.pack_forget()
         
-        # Show current page with full expansion
+        # Show current page
         pages[current_page].pack(fill=tk.BOTH, expand=True)
+        
+        # Update page indicator
+        update_page_indicator()
+    
+    def update_page_indicator():
+        page_indicator.config(text=f"{page_names[current_page]} ({current_page + 1}/4)")
     
     # Left arrow button
     left_arrow_frame = tk.Frame(canvas, bg="#222222")
@@ -4779,6 +4602,12 @@ def create_arrow_buttons():
                                bd=0,
                                cursor="hand2")
     right_arrow_btn.pack(padx=5)
+    
+    # Page indicator
+    global page_indicator
+    page_indicator = tk.Label(canvas, text=f"{page_names[current_page]} ({current_page + 1}/4)",
+                             bg="#222222", fg="lightgray", font=("Arial", 9))
+    page_indicator.place(relx=0.5, rely=0.02, anchor="n")
     
     # Keep references to prevent garbage collection
     left_arrow_btn.image = images['leftarrow']
@@ -6028,6 +5857,158 @@ def on_toggle_startup(icon, item):
 
 # system tray
 # ----------------------------------------------------------------------------------
+
+# AI Settings Window
+# ----------------------------------------------------------------------------------
+def open_ai_settings(icon=None, item=None):
+    """
+    Open a dialog to configure AI settings.
+    """
+    settings_window = tk.Toplevel(root)
+    settings_window.title("AI Settings")
+    settings_window.geometry("400x350")
+    settings_window.configure(bg="#333333")
+    settings_window.attributes("-topmost", True)
+    settings_window.resizable(False, False)
+    
+    if os.path.exists(ICON_PATHH):
+        settings_window.iconbitmap(ICON_PATHH)
+
+    # Center the window
+    screen_width = settings_window.winfo_screenwidth()
+    screen_height = settings_window.winfo_screenheight()
+    window_width, window_height = 400, 350
+    position_x = (screen_width // 2) - (window_width // 2)
+    position_y = (screen_height // 2) - (window_height // 2)
+    settings_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Header
+    tk.Label(settings_window, text="AI Configuration", font=("Arial", 16, "bold"), 
+             bg="#333333", fg="white").pack(pady=15)
+
+    # Provider Selection
+    provider_frame = tk.Frame(settings_window, bg="#333333")
+    provider_frame.pack(fill=tk.X, padx=20, pady=10)
+    
+    tk.Label(provider_frame, text="AI Provider:", bg="#333333", fg="#d2d2d2", 
+             font=("Arial", 11), width=12, anchor="w").pack(side=tk.LEFT)
+    
+    provider_var = tk.StringVar(value=ai_provider)
+    provider_combo = ttk.Combobox(provider_frame, textvariable=provider_var, 
+                                 state="readonly", font=("Arial", 10))
+    provider_combo['values'] = ('OpenAI', 'Gemini')
+    provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+
+    # API Key Entry
+    key_frame = tk.Frame(settings_window, bg="#333333")
+    key_frame.pack(fill=tk.X, padx=20, pady=10)
+    
+    tk.Label(key_frame, text="API Key:", bg="#333333", fg="#d2d2d2", 
+             font=("Arial", 11), width=12, anchor="w").pack(side=tk.LEFT)
+    
+    key_var = tk.StringVar(value=ai_api_key)
+    key_entry = tk.Entry(key_frame, textvariable=key_var, bg="#222222", fg="white", 
+                        insertbackground="white", font=("Arial", 10), show="*")
+    key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+    
+    # Show/Hide API Key button
+    show_key_var = tk.BooleanVar()
+    def toggle_key_visibility():
+        if show_key_var.get():
+            key_entry.config(show="")
+            show_key_btn.config(text="Hide")
+        else:
+            key_entry.config(show="*")
+            show_key_btn.config(text="Show")
+    
+    show_key_btn = tk.Button(key_frame, text="Show", command=toggle_key_visibility,
+                            bg="#555555", fg="white", font=("Arial", 9), width=6)
+    show_key_btn.pack(side=tk.RIGHT, padx=(5, 0))
+
+    # Instructions
+    instructions_frame = tk.Frame(settings_window, bg="#333333")
+    instructions_frame.pack(fill=tk.X, padx=20, pady=10)
+    
+    instructions_text = """Instructions:
+• OpenAI: Get your API key from https://platform.openai.com/api-keys
+• Gemini: Get your API key from https://aistudio.google.com/app/apikey
+• Keep your API key secure and don't share it with others
+• The key will be saved locally in your configuration file"""
+    
+    instructions_label = tk.Label(instructions_frame, text=instructions_text, 
+                                 bg="#333333", fg="#b0b0b0", font=("Arial", 9),
+                                 justify=tk.LEFT, wraplength=350)
+    instructions_label.pack(anchor="w")
+
+    # Test connection button
+    test_frame = tk.Frame(settings_window, bg="#333333")
+    test_frame.pack(fill=tk.X, padx=20, pady=10)
+    
+    def test_connection():
+        temp_provider = provider_var.get()
+        temp_key = key_var.get()
+        
+        if not temp_key:
+            messagebox.showwarning("Warning", "Please enter an API key first.")
+            return
+        
+        # Temporarily set the values for testing
+        global ai_provider, ai_api_key
+        old_provider = ai_provider
+        old_key = ai_api_key
+        
+        ai_provider = temp_provider
+        ai_api_key = temp_key
+        
+        test_btn.config(text="Testing...", state=tk.DISABLED)
+        
+        def run_test():
+            try:
+                response = chat_with_ai("Hello, this is a test message.")
+                if response and not response.startswith("Error:"):
+                    settings_window.after(0, lambda: show_test_result(True, "Connection successful!"))
+                else:
+                    settings_window.after(0, lambda: show_test_result(False, response))
+            except Exception as e:
+                settings_window.after(0, lambda: show_test_result(False, str(e)))
+            finally:
+                # Restore original values
+                ai_provider = old_provider
+                ai_api_key = old_key
+        
+        threading.Thread(target=run_test, daemon=True).start()
+    
+    def show_test_result(success, message):
+        test_btn.config(text="Test Connection", state=tk.NORMAL)
+        if success:
+            messagebox.showinfo("Test Result", message)
+        else:
+            messagebox.showerror("Test Failed", f"Connection failed: {message}")
+    
+    test_btn = tk.Button(test_frame, text="Test Connection", command=test_connection,
+                        bg="#666666", fg="white", font=("Arial", 10))
+    test_btn.pack()
+
+    def save_settings():
+        global ai_provider, ai_api_key
+        ai_provider = provider_var.get()
+        ai_api_key = key_var.get()
+        save_config()
+        show_notification(APP_NAME, f"AI settings saved: {ai_provider}")
+        logging.info(f"AI settings saved: Provider={ai_provider}, Key={'*' * len(ai_api_key) if ai_api_key else 'None'}")
+        settings_window.destroy()
+
+    # Buttons
+    btn_frame = tk.Frame(settings_window, bg="#333333")
+    btn_frame.pack(pady=20)
+    
+    tk.Button(btn_frame, text="Save", command=save_settings, 
+              bg="#4CAF50", fg="white", width=12, font=("Arial", 10)).pack(side=tk.LEFT, padx=10)
+    
+    tk.Button(btn_frame, text="Cancel", command=settings_window.destroy, 
+              bg="#f44336", fg="white", width=12, font=("Arial", 10)).pack(side=tk.LEFT, padx=10)
+
+
 def create_system_tray():
     """Create system tray icon with menu"""
     global system_tray_icon
@@ -6147,25 +6128,18 @@ def create_system_tray():
     # Load the icon
     icon_image = Image.open(get_asset_path("assets/images/upmenu.ico"))
     
-    def on_ai_settings(icon, item):
-        """Open AI settings dialog from system tray"""
-        try:
-            root.after(0, open_ai_settings)
-        except Exception as e:
-            logging.error(f"Error opening AI settings: {e}")
-            print(f"Error opening AI settings: {e}")
-    
     # Create the menu
     menu = (
         pystray.MenuItem("Hide", on_hide),
         pystray.MenuItem("Show", on_show),
         pystray.MenuItem("Run on Startup", (on_toggle_startup), checked=is_startup_checked),
         pystray.MenuItem("Take Screenshot", take_screenshot),
+        pystray.MenuItem("AI Settings", open_ai_settings),
         pystray.MenuItem("Toggle Keyboard", toggle_keyboard),
         pystray.MenuItem("Developer", on_developer),
+
         pystray.MenuItem("Restore Defaults", restore_defaults),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("AI Settings", on_ai_settings),
         pystray.MenuItem("Open Config", on_open_config),
         pystray.MenuItem("Open Bookmarks", on_open_bookmarks),
         pystray.MenuItem("Open Shortcuts", on_open_shortcuts),

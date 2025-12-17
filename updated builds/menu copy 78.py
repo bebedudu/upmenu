@@ -55,19 +55,15 @@ try:
     import warnings
     warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
     
-    # Try old package (it's more stable and well-documented)
+    # Try new package first, fall back to old one
     try:
-        import google.generativeai as genai
-        GEMINI_NEW_API = False
-    except ImportError:
-        # If old not available, try new
         import google.genai as genai
-        GEMINI_NEW_API = True
+    except ImportError:
+        import google.generativeai as genai
     
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    GEMINI_NEW_API = False
     logging.warning("Google Generative AI library not available")
 
 # Image paths
@@ -710,43 +706,23 @@ class AudioController:
         return cls._instance
     
     def __init__(self):
-        # Always try to initialize if not available
-        if not AudioController._initialized or not self.is_available():
+        if not AudioController._initialized:
             self._init_audio()
             AudioController._initialized = True
     
     def _init_audio(self):
         try:
-            devices = AudioUtilities.GetSpeakers()
-            if devices:
-                # Handle both old and new pycaw API
-                if hasattr(devices, 'Activate'):
-                    # Old API
-                    self.interface = devices.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, '_dev') and hasattr(devices._dev, 'Activate'):
-                    # New API - access underlying device
-                    self.interface = devices._dev.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, 'activate'):
-                    # Alternative new API
-                    self.interface = devices.activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                else:
-                    raise Exception("Cannot activate audio endpoint - unsupported pycaw version")
-                
+            self.devices = AudioUtilities.GetSpeakers()
+            if self.devices:
+                self.interface = self.devices.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 self.volume = cast(self.interface, POINTER(IAudioEndpointVolume))
-                self.devices = devices
-                
-                # Test if it actually works
-                test = self.volume.GetMasterVolumeLevelScalar()
-                logging.info(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
-                print(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
+                # Register cleanup with atexit
+                atexit.register(self._cleanup)
             else:
                 raise Exception("No audio devices found")
         except Exception as e:
-            logging.warning(f"Audio device not available: {e}")
-            print(f"Audio device not available: {e}")
+            logging.error(f"Error initializing audio controller: {e}")
             self.devices = None
             self.interface = None
             self.volume = None
@@ -760,7 +736,7 @@ class AudioController:
     
     def is_available(self):
         """Check if audio controller is properly initialized"""
-        return hasattr(self, 'volume') and self.volume is not None
+        return self.volume is not None
 
 
 # ----------------------------------------------------------------------------------
@@ -786,7 +762,8 @@ def mute_speakers():
         else:
             show_notification(APP_NAME, "Audio device not available")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error muting speakers: {e}")
+        print(f"Error muting speakers: {e}")
 
 def unmute_speakers():
     try:
@@ -798,7 +775,8 @@ def unmute_speakers():
         else:
             show_notification(APP_NAME, "Audio device not available")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error unmuting speakers: {e}")
+        print(f"Error unmuting speakers: {e}")
 
 def shut_down():
     try:
@@ -3641,9 +3619,7 @@ def call_gemini_api(prompt, api_key):
         return "Google Generative AI library is not installed. Please install it using: pip install google-generativeai"
     
     try:
-        # Configure based on API version
         genai.configure(api_key=api_key)
-        
         # Try different model names in order of preference
         model_names = ['gemini-2.5-pro', 'gemini-pro-latest', 'gemini-2.5-flash']
         
@@ -3816,37 +3792,36 @@ def create_fourth_page(parent):
     context_menu = create_context_menu(fourth_page)
     fourth_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
     
-    # Chat display area with scrollbar - full width
+    # Title
+    title_label = tk.Label(fourth_page, text="AI Chat Assistant",
+                          font=("Arial", 14, "bold"), fg="#d2d2d2", bg="#222222")
+    title_label.pack(pady=5)
+    
+    # Chat display area with scrollbar
     chat_frame = tk.Frame(fourth_page, bg="#222222")
-    chat_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
+    chat_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     
     chat_scrollbar = ttk.Scrollbar(chat_frame, orient="vertical")
     chat_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     
     chat_display = tk.Text(chat_frame, bg="#333333", fg="#d2d2d2",
                           font=("Arial", 10), wrap=tk.WORD, height=5,
-                          yscrollcommand=chat_scrollbar.set, state=tk.DISABLED,
-                          padx=10, pady=5)
+                          yscrollcommand=chat_scrollbar.set, state=tk.DISABLED)
     chat_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     chat_scrollbar.config(command=chat_display.yview)
-    
-    # Add welcome message
-    chat_display.config(state=tk.NORMAL)
-    chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
-    chat_display.config(state=tk.DISABLED)
     
     # Configure tags for different message types
     chat_display.tag_config("user", foreground="#4CAF50", font=("Arial", 10, "bold"))
     chat_display.tag_config("ai", foreground="#2196F3", font=("Arial", 10, "bold"))
     chat_display.tag_config("error", foreground="#f44336")
     
-    # Input area - full width
+    # Input area
     input_frame = tk.Frame(fourth_page, bg="#222222")
-    input_frame.pack(fill=tk.X, padx=2, pady=5)
+    input_frame.pack(fill=tk.X, padx=10, pady=5)
     
     question_entry = tk.Entry(input_frame, bg="#333333", fg="#d2d2d2",
                              font=("Arial", 11), insertbackground="white")
-    question_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5), ipady=3)
+    question_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
     question_entry.insert(0, "Ask me anything...")
     question_entry.config(fg="grey")
     
@@ -3911,24 +3886,23 @@ def create_fourth_page(parent):
         # Run in thread to avoid blocking UI
         threading.Thread(target=get_response, daemon=True).start()
     
-    # Clear button function
+    send_btn = tk.Button(input_frame, text="Send", command=send_message,
+                        bg="#444444", fg="white", width=8)
+    send_btn.pack(side=tk.LEFT)
+    
+    question_entry.bind("<Return>", lambda e: send_message())
+    
+    # Clear button
     def clear_chat():
         global ai_chat_history
         ai_chat_history = []
         chat_display.config(state=tk.NORMAL)
         chat_display.delete(1.0, tk.END)
-        chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
         chat_display.config(state=tk.DISABLED)
     
-    send_btn = tk.Button(input_frame, text="Send", command=send_message,
-                        bg="#444444", fg="white", width=8)
-    send_btn.pack(side=tk.LEFT, padx=(0, 5))
-    
-    clear_btn = tk.Button(input_frame, text="Clear Chat", command=clear_chat,
+    clear_btn = tk.Button(fourth_page, text="Clear Chat", command=clear_chat,
                          bg="#444444", fg="white", width=10)
-    clear_btn.pack(side=tk.LEFT)
-    
-    question_entry.bind("<Return>", lambda e: send_message())
+    clear_btn.pack(pady=5)
     
     return fourth_page
 
@@ -3983,7 +3957,7 @@ fourth_page_frame = create_fourth_page(main_container)
 
 # Set the initial page to be visible
 current_page = 0  # Ensure this is set to the index of the first page
-main_page_frame.pack(fill=tk.BOTH, expand=True)  # Ensure the main page is packed initially
+main_page_frame.pack()  # Ensure the main page is packed initially
 second_page_frame.pack_forget()  # Hide second page initially
 third_page_frame.pack_forget()  # Hide third page
 fourth_page_frame.pack_forget()  # Hide fourth page
@@ -4739,7 +4713,7 @@ check_mouse_position()
 def create_arrow_buttons():
     def switch_page(direction):
         global current_page
-        pages = [main_page_frame, second_page_frame, fourth_page_frame, third_page_frame]  # AI chat on page 3, Coming Soon on page 4
+        pages = [main_page_frame, second_page_frame, third_page_frame, fourth_page_frame]  # Now includes fourth page
         total_pages = len(pages)
         
         if direction == "right":
@@ -4751,8 +4725,8 @@ def create_arrow_buttons():
         for page in pages:
             page.pack_forget()
         
-        # Show current page with full expansion
-        pages[current_page].pack(fill=tk.BOTH, expand=True)
+        # Show current page
+        pages[current_page].pack()
     
     # Left arrow button
     left_arrow_frame = tk.Frame(canvas, bg="#222222")

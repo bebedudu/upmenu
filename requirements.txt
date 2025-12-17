@@ -1,0 +1,17 @@
+WMI
+psutil
+pystray
+requests
+pywin32
+PyAutoGUI
+keyboard
+PyGetWindow
+elevate
+plyer
+comtypes
+tkcalendar
+Pillow
+pynput
+pycaw
+openai
+google-generativeai

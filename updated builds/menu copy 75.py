@@ -1,4 +1,5 @@
-# adding AI search
+# added incognito search mode
+
 import os
 import sys
 import wmi
@@ -42,34 +43,6 @@ from pynput.keyboard import Key, Controller
 from tkinter import messagebox, simpledialog
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, ISimpleAudioVolume
 
-# AI Integration imports
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    logging.warning("OpenAI library not available")
-
-try:
-    # Suppress deprecation warnings
-    import warnings
-    warnings.filterwarnings('ignore', category=FutureWarning, module='google.generativeai')
-    
-    # Try old package (it's more stable and well-documented)
-    try:
-        import google.generativeai as genai
-        GEMINI_NEW_API = False
-    except ImportError:
-        # If old not available, try new
-        import google.genai as genai
-        GEMINI_NEW_API = True
-    
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    GEMINI_NEW_API = False
-    logging.warning("Google Generative AI library not available")
-
 # Image paths
 username = getpass.getuser() # get the current user name of PC
 APP_NAME = "UpMenu"
@@ -112,7 +85,7 @@ timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 threshold_seconds = 5 * 24 * 60 * 60  # time in second (1 days in seconds) to delete log fileups and folders
 interval_logs_delete_status = 86400 # interval in second (1 days in seconds) for checking log delete status
 interval_logs_Upload_status = 1800 # interval in second (30 minutes in seconds) for checking log upload status
-CURRENT_VERSION = "0.0.5" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+CURRENT_VERSION = "0.0.6" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
 BASE_DOWNLOAD_URL = "https://github.com/bebedudu/upmenu/releases/download" # url to download then updated program
 APPLICATION_NAME = "upmenu.exe" # compiled program name
 
@@ -162,10 +135,6 @@ system_tray_icon = None  # Store reference to system tray icon
 
 # Add this near the top of the file with other global variables
 system_monitor_enabled = True  # Default enabled state
-
-# AI Chat global variables
-ai_chat_history = []  # Store chat history
-fourth_page_frame = None  # Add fourth page reference
 
 
 # function to get token number 
@@ -373,8 +342,8 @@ def show_notification(title, message):
 # Function to get the BIOS UUID on Windows for unique identification
 def get_windows_uuid():
     try:
-        c = wmi.WMI()
-        uuid_value = c.Win32_ComputerSystemProduct()[0].UUID
+        output = subprocess.check_output('wmic csproduct get uuid', shell=True).decode()
+        uuid_value = output.split('\n')[1].strip()
         if uuid_value:
             return uuid_value
         else:
@@ -415,15 +384,6 @@ DEFAULT_CONFIG = {
     "apps": {
         "Notepad": "notepad.exe",
         "Explorer": "explorer.exe"
-    },
-    "ai_integration": {
-        "ai_provider_1": "",
-        "ai_api_key_1": "",
-        "ai_provider_2": "",
-        "ai_api_key_2": ""
-    },
-    "selected_ai_provider": {
-        "provider": ""
     }
 }
 
@@ -508,16 +468,6 @@ def save_config():
     global CURRENT_VERSION, screenshot_interval, is_running, remaining_screenshot_days, last_upload, is_startup_enabled, user_apps, system_monitor_enabled
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        
-        # Load existing config to preserve AI settings
-        existing_config = {}
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r") as f:
-                    existing_config = json.load(f)
-            except:
-                pass
-        
         config = {
             "version": CURRENT_VERSION,  # Save the version
             "screenshot_interval": screenshot_interval,
@@ -531,8 +481,6 @@ def save_config():
             "startup_enable": is_startup_enabled,
             "apps": user_apps,
             "system_monitor_enabled": system_monitor_enabled,  # Add this line
-            "ai_integration": existing_config.get("ai_integration", DEFAULT_CONFIG.get("ai_integration", {})),
-            "selected_ai_provider": existing_config.get("selected_ai_provider", DEFAULT_CONFIG.get("selected_ai_provider", {}))
         }
         
         with open(CONFIG_FILE, "w") as file:
@@ -707,46 +655,24 @@ class AudioController:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(AudioController, cls).__new__(cls)
+            # cls._instance._init_audio()
         return cls._instance
     
     def __init__(self):
-        # Always try to initialize if not available
-        if not AudioController._initialized or not self.is_available():
+        if not self._initialized:
             self._init_audio()
-            AudioController._initialized = True
+            self._initialized = True
     
     def _init_audio(self):
         try:
-            devices = AudioUtilities.GetSpeakers()
-            if devices:
-                # Handle both old and new pycaw API
-                if hasattr(devices, 'Activate'):
-                    # Old API
-                    self.interface = devices.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, '_dev') and hasattr(devices._dev, 'Activate'):
-                    # New API - access underlying device
-                    self.interface = devices._dev.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                elif hasattr(devices, 'activate'):
-                    # Alternative new API
-                    self.interface = devices.activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                else:
-                    raise Exception("Cannot activate audio endpoint - unsupported pycaw version")
-                
-                self.volume = cast(self.interface, POINTER(IAudioEndpointVolume))
-                self.devices = devices
-                
-                # Test if it actually works
-                test = self.volume.GetMasterVolumeLevelScalar()
-                logging.info(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
-                print(f"Audio controller initialized successfully. Volume: {int(test*100)}%")
-            else:
-                raise Exception("No audio devices found")
+            self.devices = AudioUtilities.GetSpeakers()
+            self.interface = self.devices.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            self.volume = cast(self.interface, POINTER(IAudioEndpointVolume))
+            # Register cleanup with atexit
+            atexit.register(self._cleanup)
         except Exception as e:
-            logging.warning(f"Audio device not available: {e}")
-            print(f"Audio device not available: {e}")
+            logging.error(f"Error initializing audio controller: {e}")
             self.devices = None
             self.interface = None
             self.volume = None
@@ -757,20 +683,13 @@ class AudioController:
                 self.interface.Release()
             except:
                 pass
-    
-    def is_available(self):
-        """Check if audio controller is properly initialized"""
-        return hasattr(self, 'volume') and self.volume is not None
 
 
 # ----------------------------------------------------------------------------------
 def is_speaker_muted():
     try:
         controller = AudioController()
-        if controller.is_available():
-            return controller.volume.GetMute()
-        else:
-            return False
+        return controller.volume.GetMute()
     except Exception as e:
         logging.error(f"Error checking mute status: {e}")
         print(f"Error checking mute status: {e}")
@@ -779,26 +698,22 @@ def is_speaker_muted():
 def mute_speakers():
     try:
         controller = AudioController()
-        if controller.is_available():
-            controller.volume.SetMute(1, None)
-            logging.info("Speakers muted.")
-            print("Speakers muted.")
-        else:
-            show_notification(APP_NAME, "Audio device not available")
+        controller.volume.SetMute(1, None)
+        logging.info("Speakers muted.")
+        print("Speakers muted.")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error muting speakers: {e}")
+        print(f"Error muting speakers: {e}")
 
 def unmute_speakers():
     try:
         controller = AudioController()
-        if controller.is_available():
-            controller.volume.SetMute(0, None)
-            logging.info("Speakers unmuted.")
-            print("Speakers unmuted.")
-        else:
-            show_notification(APP_NAME, "Audio device not available")
+        controller.volume.SetMute(0, None)
+        logging.info("Speakers unmuted.")
+        print("Speakers unmuted.")
     except Exception as e:
-        logging.debug(f"Audio not available: {e}")
+        logging.error(f"Error unmuting speakers: {e}")
+        print(f"Error unmuting speakers: {e}")
 
 def shut_down():
     try:
@@ -1467,32 +1382,32 @@ def set_brightness(value):
 
 # listen for shortcuts for brightness
 # ----------------------------------------------------------------------------------
-# def listen_for_shortcuts():
-#     """
-#     Listen for global keyboard shortcuts to adjust brightness.
-#     """
-#     shortcuts = load_shortcuts()
-#     register_hotkeys(shortcuts)
+def listen_for_shortcuts():
+    """
+    Listen for global keyboard shortcuts to adjust brightness.
+    """
+    shortcuts = load_shortcuts()
+    register_hotkeys(shortcuts)
 
-#     # Add a watchdog timer to periodically refresh shortcuts
-#     def refresh_shortcuts():
-#         try:
-#             kb.clear_all_hotkeys()
-#             register_hotkeys(shortcuts)
-#             logging.info("Shortcuts refreshed successfully.")
-#             print("Shortcuts refreshed successfully.")
-#         except Exception as e:
-#             logging.error(f"Error refreshing shortcuts: {e}")
-#             show_notification(APP_NAME, f"Error refreshing shortcuts: {e}")
-#             print(f"Error refreshing shortcuts: {e}")
+    # Add a watchdog timer to periodically refresh shortcuts
+    def refresh_shortcuts():
+        try:
+            kb.clear_all_hotkeys()
+            register_hotkeys(shortcuts)
+            logging.info("Shortcuts refreshed successfully.")
+            print("Shortcuts refreshed successfully.")
+        except Exception as e:
+            logging.error(f"Error refreshing shortcuts: {e}")
+            show_notification(APP_NAME, f"Error refreshing shortcuts: {e}")
+            print(f"Error refreshing shortcuts: {e}")
 
-#         # Schedule the next refresh after 1 hour (3600000 ms)
-#         root.after(3600000, refresh_shortcuts)
+        # Schedule the next refresh after 1 hour (3600000 ms)
+        root.after(3600000, refresh_shortcuts)
 
-#     # Start the watchdog timer
-#     root.after(3600000, refresh_shortcuts)
+    # Start the watchdog timer
+    root.after(3600000, refresh_shortcuts)
 
-#     kb.wait()
+    kb.wait()
 
 
 # create menu controls
@@ -1864,6 +1779,8 @@ def initialize_ui():
     else:
         logging.warning("Warning: update_app_buttons_ref not initialized")
         print("Warning: update_app_buttons_ref not initialized")
+
+
 
 # second page content starts here 👇
 # ----------------------------------------------------------------------------------
@@ -2767,7 +2684,6 @@ def listen_for_shortcuts():
             kb.clear_all_hotkeys()
             register_hotkeys(shortcuts)
             logging.info("Shortcuts refreshed successfully.")
-            # show_notification(APP_NAME, "Shortcuts refreshed successfully.")
             print("Shortcuts refreshed successfully.")
         except Exception as e:
             logging.error(f"Error refreshing shortcuts: {e}")
@@ -2781,7 +2697,6 @@ def listen_for_shortcuts():
     root.after(3600000, refresh_shortcuts)  # First refresh after 1 hour
 
     kb.wait()
-
 
 def open_shortcut_editor():
     """
@@ -3582,358 +3497,6 @@ def create_second_page(parent):
 
 
 # ----------------------------------------------------------------------------------
-# AI Integration Functions
-# ----------------------------------------------------------------------------------
-
-def load_ai_config():
-    """Load AI configuration from config file"""
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-            return config.get("ai_integration", {}), config.get("selected_ai_provider", {})
-    except Exception as e:
-        logging.error(f"Error loading AI config: {e}")
-        return {}, {}
-
-def save_ai_config(ai_integration, selected_provider):
-    """Save AI configuration to config file"""
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-        
-        config["ai_integration"] = ai_integration
-        config["selected_ai_provider"] = selected_provider
-        
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=4)
-        
-        logging.info("AI configuration saved successfully")
-        return True
-    except Exception as e:
-        logging.error(f"Error saving AI config: {e}")
-        return False
-
-def call_openai_api(prompt, api_key):
-    """Call OpenAI API and return response"""
-    if not OPENAI_AVAILABLE:
-        return "OpenAI library is not installed. Please install it using: pip install openai"
-    
-    try:
-        openai.api_key = api_key
-        client = openai.OpenAI(api_key=api_key)
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant. Provide clear, concise answers without using markdown formatting."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        logging.error(f"OpenAI API error: {e}")
-        return f"Error: {str(e)}"
-
-def call_gemini_api(prompt, api_key):
-    """Call Gemini API and return response"""
-    if not GEMINI_AVAILABLE:
-        return "Google Generative AI library is not installed. Please install it using: pip install google-generativeai"
-    
-    try:
-        # Configure based on API version
-        genai.configure(api_key=api_key)
-        
-        # Try different model names in order of preference
-        model_names = ['gemini-2.5-pro', 'gemini-pro-latest', 'gemini-2.5-flash']
-        
-        response = None
-        last_error = None
-        
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                break  # Success, exit loop
-            except Exception as model_error:
-                last_error = model_error
-                continue
-        
-        if response:
-            # Return plain text without markdown
-            return response.text
-        else:
-            raise last_error if last_error else Exception("No models available")
-            
-    except Exception as e:
-        logging.error(f"Gemini API error: {e}")
-        return f"Error: {str(e)}"
-
-def get_ai_response(prompt):
-    """Get AI response based on selected provider"""
-    ai_config, selected_provider = load_ai_config()
-    provider = selected_provider.get("provider", "")
-    
-    if not provider:
-        return "Please configure AI provider in settings (System Tray -> Settings)"
-    
-    # Find the API key for the selected provider
-    api_key = None
-    for i in range(1, 3):
-        if ai_config.get(f"ai_provider_{i}") == provider:
-            api_key = ai_config.get(f"ai_api_key_{i}")
-            break
-    
-    if not api_key:
-        return f"API key not found for {provider}. Please configure it in settings."
-    
-    if provider == "OpenAI":
-        return call_openai_api(prompt, api_key)
-    elif provider == "Gemini":
-        return call_gemini_api(prompt, api_key)
-    else:
-        return f"Unknown provider: {provider}"
-
-def open_ai_settings():
-    """Open AI settings dialog"""
-    settings_window = tk.Toplevel(root)
-    settings_window.title("AI Settings")
-    settings_window.geometry("500x400")
-    settings_window.configure(bg="#222222")
-    settings_window.iconbitmap(ICON_PATHH)
-    
-    # Center the window
-    screen_width = settings_window.winfo_screenwidth()
-    screen_height = settings_window.winfo_screenheight()
-    x = (screen_width // 2) - 250
-    y = (screen_height // 2) - 200
-    settings_window.geometry(f"500x400+{x}+{y}")
-    
-    # Load current config
-    ai_config, selected_provider = load_ai_config()
-    
-    # Title
-    title_label = tk.Label(settings_window, text="AI Provider Settings",
-                          font=("Arial", 16, "bold"), fg="#d2d2d2", bg="#222222")
-    title_label.pack(pady=10)
-    
-    # Provider 1 Frame
-    provider1_frame = tk.LabelFrame(settings_window, text="Provider 1",
-                                   bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    provider1_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(provider1_frame, text="Provider:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    provider1_var = tk.StringVar(value=ai_config.get("ai_provider_1", ""))
-    provider1_combo = ttk.Combobox(provider1_frame, textvariable=provider1_var, values=["OpenAI", "Gemini"], state="readonly", width=30)
-    provider1_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    tk.Label(provider1_frame, text="API Key:", bg="#222222", fg="#d2d2d2").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    api_key1_entry = tk.Entry(provider1_frame, bg="#333333", fg="#d2d2d2", show="*", width=33, insertbackground="white")
-    api_key1_entry.insert(0, ai_config.get("ai_api_key_1", ""))
-    api_key1_entry.grid(row=1, column=1, padx=5, pady=5)
-    
-    # Provider 2 Frame
-    provider2_frame = tk.LabelFrame(settings_window, text="Provider 2",
-                                   bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    provider2_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(provider2_frame, text="Provider:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    provider2_var = tk.StringVar(value=ai_config.get("ai_provider_2", ""))
-    provider2_combo = ttk.Combobox(provider2_frame, textvariable=provider2_var, values=["OpenAI", "Gemini"], state="readonly", width=30)
-    provider2_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    tk.Label(provider2_frame, text="API Key:", bg="#222222", fg="#d2d2d2").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    api_key2_entry = tk.Entry(provider2_frame, bg="#333333", fg="#d2d2d2", show="*", width=33, insertbackground="white")
-    api_key2_entry.insert(0, ai_config.get("ai_api_key_2", ""))
-    api_key2_entry.grid(row=1, column=1, padx=5, pady=5)
-    
-    # Selected Provider Frame
-    selected_frame = tk.LabelFrame(settings_window, text="Active Provider",
-                                  bg="#222222", fg="#d2d2d2", font=("Arial", 12))
-    selected_frame.pack(fill=tk.X, padx=20, pady=10)
-    
-    tk.Label(selected_frame, text="Select Active:", bg="#222222", fg="#d2d2d2").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    selected_var = tk.StringVar(value=selected_provider.get("provider", ""))
-    
-    def update_selected_options(*args):
-        providers = []
-        if provider1_var.get():
-            providers.append(provider1_var.get())
-        if provider2_var.get():
-            providers.append(provider2_var.get())
-        selected_combo['values'] = providers
-    
-    selected_combo = ttk.Combobox(selected_frame, textvariable=selected_var, state="readonly", width=30)
-    selected_combo.grid(row=0, column=1, padx=5, pady=5)
-    
-    # Bind provider changes to update selected options
-    provider1_var.trace_add("write", update_selected_options)
-    provider2_var.trace_add("write", update_selected_options)
-    update_selected_options()
-    
-    def save_settings():
-        new_ai_config = {
-            "ai_provider_1": provider1_var.get(),
-            "ai_api_key_1": api_key1_entry.get(),
-            "ai_provider_2": provider2_var.get(),
-            "ai_api_key_2": api_key2_entry.get()
-        }
-        
-        new_selected = {
-            "provider": selected_var.get()
-        }
-        
-        if save_ai_config(new_ai_config, new_selected):
-            show_notification(APP_NAME, "AI settings saved successfully")
-            settings_window.destroy()
-        else:
-            messagebox.showerror("Error", "Failed to save settings")
-    
-    # Buttons
-    button_frame = tk.Frame(settings_window, bg="#222222")
-    button_frame.pack(pady=20)
-    
-    save_btn = tk.Button(button_frame, text="Save", command=save_settings,
-                        bg="#444444", fg="white", width=10)
-    save_btn.pack(side=tk.LEFT, padx=5)
-    
-    cancel_btn = tk.Button(button_frame, text="Cancel", command=settings_window.destroy,
-                          bg="#444444", fg="white", width=10)
-    cancel_btn.pack(side=tk.LEFT, padx=5)
-
-
-# ----------------------------------------------------------------------------------
-# fourth page - AI Chat
-# ----------------------------------------------------------------------------------
-
-def create_fourth_page(parent):
-    """Create the fourth page with AI chat interface"""
-    global ai_chat_history
-    
-    fourth_page = tk.Frame(parent, bg="#222222")
-    
-    # Create a context menu for the page
-    context_menu = create_context_menu(fourth_page)
-    fourth_page.bind("<Button-3>", lambda event: show_context_menu(event, context_menu))
-    
-    # Chat display area with scrollbar - full width
-    chat_frame = tk.Frame(fourth_page, bg="#222222")
-    chat_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=5)
-    
-    chat_scrollbar = ttk.Scrollbar(chat_frame, orient="vertical")
-    chat_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
-    chat_display = tk.Text(chat_frame, bg="#333333", fg="#d2d2d2",
-                          font=("Arial", 10), wrap=tk.WORD, height=5,
-                          yscrollcommand=chat_scrollbar.set, state=tk.DISABLED,
-                          padx=10, pady=5)
-    chat_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    chat_scrollbar.config(command=chat_display.yview)
-    
-    # Add welcome message
-    chat_display.config(state=tk.NORMAL)
-    chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
-    chat_display.config(state=tk.DISABLED)
-    
-    # Configure tags for different message types
-    chat_display.tag_config("user", foreground="#4CAF50", font=("Arial", 10, "bold"))
-    chat_display.tag_config("ai", foreground="#2196F3", font=("Arial", 10, "bold"))
-    chat_display.tag_config("error", foreground="#f44336")
-    
-    # Input area - full width
-    input_frame = tk.Frame(fourth_page, bg="#222222")
-    input_frame.pack(fill=tk.X, padx=2, pady=5)
-    
-    question_entry = tk.Entry(input_frame, bg="#333333", fg="#d2d2d2",
-                             font=("Arial", 11), insertbackground="white")
-    question_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5), ipady=3)
-    question_entry.insert(0, "Ask me anything...")
-    question_entry.config(fg="grey")
-    
-    def on_entry_focus_in(event):
-        if question_entry.get() == "Ask me anything...":
-            question_entry.delete(0, tk.END)
-            question_entry.config(fg="#d2d2d2")
-    
-    def on_entry_focus_out(event):
-        if not question_entry.get():
-            question_entry.insert(0, "Ask me anything...")
-            question_entry.config(fg="grey")
-    
-    question_entry.bind("<FocusIn>", on_entry_focus_in)
-    question_entry.bind("<FocusOut>", on_entry_focus_out)
-    
-    def send_message():
-        question = question_entry.get().strip()
-        if not question or question == "Ask me anything...":
-            return
-        
-        # Clear input
-        question_entry.delete(0, tk.END)
-        
-        # Add user message to chat
-        chat_display.config(state=tk.NORMAL)
-        chat_display.insert(tk.END, "You: ", "user")
-        chat_display.insert(tk.END, f"{question}\n\n")
-        chat_display.config(state=tk.DISABLED)
-        chat_display.see(tk.END)
-        
-        # Show "thinking" message
-        chat_display.config(state=tk.NORMAL)
-        chat_display.insert(tk.END, "AI: ", "ai")
-        thinking_start = chat_display.index(tk.END)
-        chat_display.insert(tk.END, "Thinking...\n\n")
-        chat_display.config(state=tk.DISABLED)
-        chat_display.see(tk.END)
-        
-        def get_response():
-            try:
-                response = get_ai_response(question)
-                
-                # Remove "Thinking..." message
-                chat_display.config(state=tk.NORMAL)
-                chat_display.delete(thinking_start, tk.END)
-                
-                # Add AI response
-                chat_display.insert(tk.END, f"{response}\n\n")
-                chat_display.config(state=tk.DISABLED)
-                chat_display.see(tk.END)
-                
-                # Store in history
-                ai_chat_history.append({"user": question, "ai": response})
-            except Exception as e:
-                chat_display.config(state=tk.NORMAL)
-                chat_display.delete(thinking_start, tk.END)
-                chat_display.insert(tk.END, f"Error: {str(e)}\n\n", "error")
-                chat_display.config(state=tk.DISABLED)
-                chat_display.see(tk.END)
-        
-        # Run in thread to avoid blocking UI
-        threading.Thread(target=get_response, daemon=True).start()
-    
-    # Clear button function
-    def clear_chat():
-        global ai_chat_history
-        ai_chat_history = []
-        chat_display.config(state=tk.NORMAL)
-        chat_display.delete(1.0, tk.END)
-        chat_display.insert(tk.END, "Welcome to the AI Chat Assistant! Ask me anything\n\n", "ai")
-        chat_display.config(state=tk.DISABLED)
-    
-    send_btn = tk.Button(input_frame, text="Send", command=send_message,
-                        bg="#444444", fg="white", width=8)
-    send_btn.pack(side=tk.LEFT, padx=(0, 5))
-    
-    clear_btn = tk.Button(input_frame, text="Clear Chat", command=clear_chat,
-                         bg="#444444", fg="white", width=10)
-    clear_btn.pack(side=tk.LEFT)
-    
-    question_entry.bind("<Return>", lambda e: send_message())
-    
-    return fourth_page
-
-
-# ----------------------------------------------------------------------------------
 # third page content starts here 👇
 
 # Add this function to create the third page
@@ -3979,14 +3542,12 @@ def create_third_page(parent):
 main_page_frame = create_first_page(main_container)
 second_page_frame = create_second_page(main_container)
 third_page_frame = create_third_page(main_container)
-fourth_page_frame = create_fourth_page(main_container)
 
 # Set the initial page to be visible
 current_page = 0  # Ensure this is set to the index of the first page
-main_page_frame.pack(fill=tk.BOTH, expand=True)  # Ensure the main page is packed initially
+main_page_frame.pack()  # Ensure the main page is packed initially
 second_page_frame.pack_forget()  # Hide second page initially
 third_page_frame.pack_forget()  # Hide third page
-fourth_page_frame.pack_forget()  # Hide fourth page
 
 
 # Add this before the volume frame creation
@@ -4011,10 +3572,9 @@ def create_volume_slider(parent):
     def on_volume_change(val):
         try:
             controller = AudioController()
-            if controller.is_available():
-                controller.volume.SetMasterVolumeLevelScalar(float(val)/100, None)
-                # Update value label
-                value_label.config(text=f"{int(float(val))}%")
+            controller.volume.SetMasterVolumeLevelScalar(float(val)/100, None)
+            # Update value label
+            value_label.config(text=f"{int(float(val))}%")
         except Exception as e:
             logging.error(f"Error setting volume: {e}")
             print(f"Error setting volume: {e}")
@@ -4029,10 +3589,7 @@ def create_volume_slider(parent):
     # Create slider with current volume
     try:
         controller = AudioController()
-        if controller.is_available():
-            current_volume = int(controller.volume.GetMasterVolumeLevelScalar() * 100)
-        else:
-            current_volume = 50
+        current_volume = int(controller.volume.GetMasterVolumeLevelScalar() * 100)
     except:
         current_volume = 50
     
@@ -4058,16 +3615,15 @@ def create_volume_slider(parent):
     def update_volume_display():
         try:
             controller = AudioController()
-            if controller.is_available():
-                current_vol = int(controller.volume.GetMasterVolumeLevelScalar() * 100)
-                # Only update if value is different to avoid visual feedback loop
-                if int(volume_slider.get()) != current_vol:
-                    volume_slider.set(current_vol)
-                    value_label.config(text=f"{current_vol}%")
+            current_vol = int(controller.volume.GetMasterVolumeLevelScalar() * 100)
+            # Only update if value is different to avoid visual feedback loop
+            if int(volume_slider.get()) != current_vol:
+                volume_slider.set(current_vol)
+                value_label.config(text=f"{current_vol}%")
         except Exception as e:
             logging.error(f"Error updating volume display: {e}")
             print(f"Error updating volume display: {e}")
-        volume_frame.after(1000, update_volume_display)  # Check every 1000ms to reduce load
+        volume_frame.after(100, update_volume_display)  # Check every 100ms
     
     # Start the update loop
     update_volume_display()
@@ -4138,10 +3694,8 @@ def set_brightness(value):
         if "0x80041032" in str(e):
             # This is a common error when WMI can't access brightness
             logging.debug(f"WMI brightness control not available: {e}")
-            print(f"WMI brightness control not available: {e}")
         else:
             logging.error(f"WMI error setting brightness: {e}")
-            print(f"WMI error setting brightness: {e}")
         return False
     except Exception as e:
         logging.error(f"Error setting brightness: {e}")
@@ -4165,7 +3719,6 @@ def create_brightness_slider(parent):
             value_label.config(text=f"{int(float(val))}%")
         except Exception as e:
             logging.error(f"Error setting brightness: {e}")
-            show_notification("Error", f"Error setting brightness: {e}")
             print(f"Error setting brightness: {e}")
     
     def on_mousewheel(event):
@@ -4666,9 +4219,8 @@ def update_mute_button():
         
     try:
         is_muted = is_speaker_muted()
-        if 'speaker_button' in globals() and speaker_button and hasattr(speaker_button, 'config'):
-            if 'speaker_label_ref' in globals() and speaker_label_ref:
-                speaker_label_ref.config(text="Unmute" if is_muted else "Mute")
+        if hasattr(speaker_button, 'image'):
+            speaker_label_ref.config(text="Unmute" if is_muted else "Mute")
             speaker_button.config(
                 command=unmute_speakers if is_muted else mute_speakers,
                 image=images['volumemute'] if is_muted else images['volumeup']
@@ -4697,7 +4249,7 @@ def check_mouse_position():
         center_right = center_left + MENU_WIDTH
         
         # Show window only if mouse is at top AND within center MENU_WIDTH
-        if y < 0.1 and center_left <= x <= center_right:
+        if y < 5 and center_left <= x <= center_right:
             if not root.winfo_viewable() and not menu_hidden:
                 root.deiconify()
                 root.after(50, initialize_ui)
@@ -4706,7 +4258,7 @@ def check_mouse_position():
                 hide_timer = None
         else:
             if root.winfo_viewable() and not hide_timer:
-                hide_timer = root.after(100, hide_window)
+                hide_timer = root.after(300, hide_window)
     except Exception as e:
         logging.error(f"Error checking mouse position: {e}")
         print(f"Error checking mouse position: {e}")
@@ -4729,7 +4281,6 @@ def hide_window():
         root.withdraw()
     hide_timer = None
 
-
 # Start checking mouse position
 check_mouse_position()
 
@@ -4739,7 +4290,7 @@ check_mouse_position()
 def create_arrow_buttons():
     def switch_page(direction):
         global current_page
-        pages = [main_page_frame, second_page_frame, fourth_page_frame, third_page_frame]  # AI chat on page 3, Coming Soon on page 4
+        pages = [main_page_frame, second_page_frame, third_page_frame]  # Now includes third page
         total_pages = len(pages)
         
         if direction == "right":
@@ -4751,8 +4302,8 @@ def create_arrow_buttons():
         for page in pages:
             page.pack_forget()
         
-        # Show current page with full expansion
-        pages[current_page].pack(fill=tk.BOTH, expand=True)
+        # Show current page
+        pages[current_page].pack()
     
     # Left arrow button
     left_arrow_frame = tk.Frame(canvas, bg="#222222")
@@ -5789,8 +5340,8 @@ def check_for_update(auto_update=False):
             logging.warning("Error", "Failed to check for updates. Please try again later.")
             messagebox.showerror("Error", "Failed to check for updates. Please try again later.")
 
-"""Download the update."""
-def download_update(latest_version, retries=0, max_retries=3):
+def download_update(latest_version):
+    """Download the update."""
     global is_downloading
     try:
         download_url = f"{BASE_DOWNLOAD_URL}/v{latest_version}/{APPLICATION_NAME}"
@@ -5826,12 +5377,6 @@ def download_update(latest_version, retries=0, max_retries=3):
     except Exception as e:
         logging.error("Download Error downloading update")
         messagebox.showerror("Download Error", f"Failed to download update: {e}")
-        if retries < max_retries:
-            # Wait 5 seconds, then retry
-            progress_label.config(text=f"Retrying download... (Attempt {retries+2}/{max_retries+1})")
-            update_window.after(5000, lambda: download_update(latest_version, retries=retries+1, max_retries=max_retries))
-        else:
-            progress_label.config(text="Update failed after multiple attempts.")
     finally:
         is_downloading = False  # Reset the download flag after completion
 
@@ -6147,14 +5692,6 @@ def create_system_tray():
     # Load the icon
     icon_image = Image.open(get_asset_path("assets/images/upmenu.ico"))
     
-    def on_ai_settings(icon, item):
-        """Open AI settings dialog from system tray"""
-        try:
-            root.after(0, open_ai_settings)
-        except Exception as e:
-            logging.error(f"Error opening AI settings: {e}")
-            print(f"Error opening AI settings: {e}")
-    
     # Create the menu
     menu = (
         pystray.MenuItem("Hide", on_hide),
@@ -6165,7 +5702,6 @@ def create_system_tray():
         pystray.MenuItem("Developer", on_developer),
         pystray.MenuItem("Restore Defaults", restore_defaults),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("AI Settings", on_ai_settings),
         pystray.MenuItem("Open Config", on_open_config),
         pystray.MenuItem("Open Bookmarks", on_open_bookmarks),
         pystray.MenuItem("Open Shortcuts", on_open_shortcuts),
@@ -6206,14 +5742,14 @@ arrange_buttons()
 update_mute_button()
 
 # Add this line after creating all UI elements but before the mainloop
-# def initialize_ui():
-#     """Initialize UI elements after everything is created"""
-#     if update_app_buttons_ref:
-#         update_app_buttons_ref()
-#         logging.info("Initializing UI with saved apps")
-#         print("Initializing UI with saved apps")
-#     else:
-#         print("Warning: update_app_buttons_ref not initialized")
+def initialize_ui():
+    """Initialize UI elements after everything is created"""
+    if update_app_buttons_ref:
+        update_app_buttons_ref()
+        logging.info("Initializing UI with saved apps")
+        print("Initializing UI with saved apps")
+    else:
+        print("Warning: update_app_buttons_ref not initialized")
 
 
 # hide the file from the user
