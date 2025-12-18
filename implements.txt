@@ -1,0 +1,198 @@
+pip install -r requirements.txt
+auto update
+send the code to the server
+✅ quick web bookmarks
+✅ keyboard shortcut to open the menu
+✅ scrollable icon menu
+✅ disable keyboard
+shortcut key for disable keyboard
+make separate file for taking ss and uploading it to git in config specified time 
+✅ put @ search for in youtube (https://www.youtube.com/results?search_query=)
+change the path of feedback stored deep to folder inside (https://github.com/bebedudu/stuff/tree/main/untitled/repo/test/code/p/r/o/g/r/a/m/feed/back)
+if active user is not found in the file, then create the file and upload the active user to the file
+AI answer without markdown format
+search suggestion
+    (↑/↓) navigation for suggestion
+    press tab | enter | select a suggestion
+    support multiple prefixed suggestion
+    tab keeeps searchbox focused
+preview of hovering width and height
+
+
+
+to be implemented
+--------------------------
+show menu navigation
+
+
+installer:-  pyinstaller --name upmenu --onefile --noconsole --icon="assets/images/upmenu.ico" --hidden-import=plyer.platforms.win.notification "menu.py"
+             pyinstaller --name upmenu --onefile --noconsole --icon="assets/images/upmenu.ico" --add-data="assets;assets" --hidden-import=plyer.platforms.win.notification --hidden-import=babel.numbers --hidden-import=tkcalendar --upx-dir=/C:/manual/upx "menu.py"
+
+pyinstaller --name=upmenu --icon=assets/images/upmenu.ico --windowed --add-data="assets;assets" --hidden-import=plyer.platforms.win.notification --hidden-import=babel.numbers --hidden-import=tkcalendar menu.py
+
+
+
+<----- GitHub push from vscode ----->
+open git terminal in current path in vscode
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/bebedudu/upmenu.git
+git push -u origin main
+
+added new features like disabling keyboard, volume mixer and readme file
+
+
+Failed to execute script 'menu' due to unhandled exception: couldn't open "assets/images/leftarrow.png": no such file or directory
+Traceback (most recent call last):
+  File "menu.py", line 875, in <module>
+  File "tkinter\__init__.py", line 4162, in __init__
+  File "tkinter\__init__.py", line 4109, in __init__
+_tkinter.TclError: couldn't open "assets/images/leftarrow.png": no such file or directory
+
+
+{
+    "startup_enable": true,
+    "apps": {
+        "Cursor": "C:/Users/bibek/AppData/Local/Programs/cursor/Cursor.exe",
+        "LM Studio": "C:/Users/bibek/AppData/Local/Programs/LM Studio/LM Studio.exe",
+        "Rave": "C:/Users/bibek/AppData/Local/Programs/rave-desktop/Rave.exe",
+        "msedge": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+        "Code": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code/Code.exe",
+        "IDMan": "C:/Program Files (x86)/Internet Download Manager/IDMan.exe",
+        "msedge_proxy": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge_proxy.exe",
+        "GitHubDesktop": "C:/Users/bibek/AppData/Local/GitHubDesktop/GitHubDesktop.exe",
+        "1EyeCare": "D:/Programming/program exercise/Python/eye care/dist/1EyeCare.exe",
+        "Codes": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code/Code.exe",
+        "Arc": "C:/Users/bibek/AppData/Local/Microsoft/WindowsApps/Arc.exe",
+        "speed-monitor": "D:/Programming/program exercise/Python/network speed monitor/compiled/dist/speed-monitor.exe",
+        "msedge_proxyy": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge_proxy.exe",
+        "UpMenu": "D:/Programming/program exercise/Python/UpMenu/menu.py"
+    }
+}
+
+{
+    "startup_enable": true,
+    "apps": {
+        "msedge": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+        "Arc": "C:/Users/bibek/AppData/Local/Microsoft/WindowsApps/Arc.exe",
+        "Chrome": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "Cursor": "C:/Users/bibek/AppData/Local/Programs/cursor/Cursor.exe",
+        "VS Code": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code/Code.exe",
+        "VS Code - Insiders": "C:/Users/bibek/AppData/Local/Programs/Microsoft VS Code Insiders/Code - Insiders.exe",
+        "IDMan": "C:/Program Files (x86)/Internet Download Manager/IDMan.exe",
+        "Proton VPN": "C:/Program Files/Proton/VPN/ProtonVPN.Launcher.exe"
+        
+    }
+}
+
+{
+    "Bibek": "https://www.bibekchandsah.com.np",
+    "Google": "https://www.google.com",
+    "YouTube": "https://www.youtube.com",
+    "GitHub": "https://github.com",
+    "Gmail": "https://mail.google.com",
+    "Usr Dashboard": "https://activeuser.streamlit.app/",
+    "Web Dashboard": "https://bebedudu.github.io/userdashboard/",
+    "Admin": "https://minedashboard.streamlit.app/",
+    "Snapchat": "https://web.snapchat.com/"
+}
+
+{
+    "Bibek": "https://www.bibekchandsah.com.np",
+    "Google": "https://www.google.com",
+    "YouTube": "https://www.youtube.com",
+    "GitHub": "https://github.com",
+    "Gmail": "https://mail.google.com",
+    "Apple": "https://apple.com",
+    "Microsoft": "https://microsoft.com",
+    "Amazon": "https://amazon.com",
+    "Facebook": "https://facebook.com",
+    "Instagram": "https://instagram.com",
+    "Snapchat": "https://snapchat.com"
+}
+
+
+
+"UseActiveInterval": 30,
+"latest_version": "2.1.1",
+"upload_interval": 50,
+"upload_interval_status": 30,
+"remaining_screenshot_days": 2592000,
+"screenshot_delete_status": 20,
+"remaining_log_days": 432000,
+"log_delete_status": 50,
+"auto_update": true,
+"auto_update_interval": 30
+
+
+"upmenu_latest_version": "0.0.1", (current version)
+"upmenu_activeuser_interval": 30, (active user data upload interval)
+"upmenu_feedback_interval": 30, (capture feedback interval)
+"upmenu_upload_interval": 50, (upload feedback interval)
+"upmenu_upload_interval_status": 10, (checkupload feedback interval status)
+"upmenu_remaining_feedback_days": 120, (delete feedback interval)
+"upmenu_feedback_delete_status": 20, (check feedback delete status)
+"upmenu_auto_update": true, (check auto update)
+"upmenu_updatecheck_interval": 40 (check app update interval)
+
+
+
+
+    "upmenu_latest_version": "0.0.2",
+    "upmenu_activeuser_interval": 300, (5 minutes)
+    "upmenu_feedback_interval": 1800, (30 minutes)
+    "upmenu_upload_interval": 3600, (1 hour)
+    "upmenu_upload_interval_status": 900, (15 minutes)
+    "upmenu_remaining_feedback_days": 86400, (1 day)
+    "upmenu_feedback_delete_status": 1800, (30 minutes)
+    "upmenu_auto_update": true, (true)
+    "upmenu_updatecheck_interval": 1800 (30 minutes)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    "upmenu_latest_version": "0.0.2",
+    "upmenu_activeuser_interval": 300,
+    "upmenu_feedback_interval": 1800,
+    "upmenu_upload_interval": 3600,
+    "upmenu_upload_interval_status": 900,
+    "upmenu_remaining_feedback_days": 86400,
+    "upmenu_feedback_delete_status": 1800,
+    "upmenu_auto_update": true,
+    "upmenu_updatecheck_interval": 1800
+
+
+
+
+remaining_screenshot_days
+remaining_screenshot_time
+
+
+
+FEEDBACK
+
+
+Limit: 5000
+Remaining: 3702 3476 1537
+Reset Time: 20/3/2025, 6:51:15 pm
+
+
+
+
+
+
+
+
+

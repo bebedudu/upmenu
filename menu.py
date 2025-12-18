@@ -112,7 +112,7 @@ timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 threshold_seconds = 5 * 24 * 60 * 60  # time in second (1 days in seconds) to delete log fileups and folders
 interval_logs_delete_status = 86400 # interval in second (1 days in seconds) for checking log delete status
 interval_logs_Upload_status = 1800 # interval in second (30 minutes in seconds) for checking log upload status
-CURRENT_VERSION = "0.0.5" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+CURRENT_VERSION = "0.0.7" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
 BASE_DOWNLOAD_URL = "https://github.com/bebedudu/upmenu/releases/download" # url to download then updated program
 APPLICATION_NAME = "upmenu.exe" # compiled program name
 
@@ -1392,19 +1392,216 @@ def create_top_controls(parent):
     search_entry.config(fg="grey")
     ToolTip(search_entry, f"@incognito, @youtube, @maps, @images, @amazon, @flipkart, @wiki, @wikihow, \n @github, @translate, @stackoverflow, @reddit, @quora, @medium, @linkedin, @twitter/@x, \n @news, @scholar, @weather, @duckduckgo, @spotify, @coursera, @udemy, @discord, \n @pinterest, @unsplash, @google")
 
+    # Autocomplete suggestions dropdown
+    suggestions_listbox = None
+    suggestions_window = None
+    clicking_suggestion = False
+    all_prefixes = [
+        "@youtube", "@maps", "@images", "@amazon", "@flipkart", "@wiki", "@wikihow",
+        "@github", "@translate", "@stackoverflow", "@reddit", "@quora", "@medium",
+        "@linkedin", "@twitter", "@x", "@news", "@scholar", "@weather", "@google",
+        "@duckduckgo", "@spotify", "@coursera", "@udemy", "@discord", "@pinterest",
+        "@unsplash", "@incognito"
+    ]
+
+    def get_current_prefix():
+        """Extract the prefix being typed (last word after space)"""
+        text = search_entry.get()
+        if text == placeholder_text:
+            return ""
+        # Get the last word after space
+        words = text.split()
+        if words:
+            return words[-1].lower()
+        return ""
+
+    def show_suggestions():
+        nonlocal suggestions_listbox, suggestions_window
+        current = get_current_prefix()
+        
+        # Hide if empty or just placeholder
+        if not current or current.startswith("http"):
+            hide_suggestions()
+            return
+        
+        # Find matching prefixes and sort alphabetically (case-insensitive)
+        matches = sorted([p for p in all_prefixes if p.lower().startswith(current)], key=str.lower)
+        
+        if not matches:
+            hide_suggestions()
+            return
+        
+        # Create suggestion window if not exists
+        if suggestions_window is None or not suggestions_window.winfo_exists():
+            suggestions_window = tk.Toplevel(search_entry)
+            suggestions_window.overrideredirect(True)
+            suggestions_window.attributes("-topmost", True)
+            suggestions_window.configure(bg="#333333")
+            
+            # Container frame to hold listbox + scrollbar
+            list_frame = tk.Frame(suggestions_window, bg="#333333")
+            list_frame.pack(fill=tk.BOTH, expand=True)
+
+            yscroll = ttk.Scrollbar(list_frame, orient="vertical", style="Vertical.TScrollbar")
+            yscroll.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            suggestions_listbox = tk.Listbox(list_frame, 
+                                            bg="#333333", 
+                                            fg="#d2d2d2",
+                                            font=("Arial", 10),
+                                            relief=tk.FLAT,
+                                            highlightthickness=0,
+                                            activestyle='none',
+                                            selectmode=tk.SINGLE,
+                                            yscrollcommand=yscroll.set)
+            suggestions_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            yscroll.config(command=suggestions_listbox.yview)
+            # Bind mouse events to handle selection reliably
+            def on_listbox_button_down(event):
+                nonlocal clicking_suggestion
+                clicking_suggestion = True
+
+            def on_listbox_button_up(event):
+                nonlocal clicking_suggestion
+                index = suggestions_listbox.nearest(event.y)
+                if index >= 0:
+                    suggestions_listbox.selection_clear(0, tk.END)
+                    suggestions_listbox.selection_set(index)
+                    suggestions_listbox.activate(index)
+                    select_suggestion()
+                clicking_suggestion = False
+
+            suggestions_listbox.bind("<ButtonPress-1>", on_listbox_button_down)
+            suggestions_listbox.bind("<ButtonRelease-1>", on_listbox_button_up)
+        
+        # Update listbox items
+        suggestions_listbox.delete(0, tk.END)
+        for match in matches:  # Show all suggestions; scrollbar will handle overflow
+            suggestions_listbox.insert(tk.END, match)
+        suggestions_listbox.selection_set(0)
+        
+        # Position window below search entry; limit visible height to 7 items, rest scrollable
+        items_shown = min(len(matches), 7)
+        x = search_entry.winfo_rootx()
+        y = search_entry.winfo_rooty() + search_entry.winfo_height() + 2
+        width = search_entry.winfo_width()
+        suggestions_window.geometry(f"{width}x{items_shown * 24 + 6}+{x}+{y}")
+
+    def hide_suggestions():
+        nonlocal suggestions_window
+        if suggestions_window and suggestions_window.winfo_exists():
+            suggestions_window.destroy()
+            suggestions_window = None
+
+    def select_suggestion(event=None):
+        nonlocal suggestions_listbox
+        if suggestions_listbox and suggestions_window and suggestions_window.winfo_exists():
+            selection = suggestions_listbox.curselection()
+            if selection:
+                suggestion = suggestions_listbox.get(selection[0])
+                # Replace current prefix with suggestion
+                text = search_entry.get()
+                words = text.split()
+                if words:
+                    words[-1] = suggestion
+                    search_entry.delete(0, tk.END)
+                    search_entry.insert(0, " ".join(words) + " ")
+                    search_entry.config(fg="#ffffff")
+                hide_suggestions()
+                # Keep focus on search entry and move cursor to end
+                root.after(10, lambda: (search_entry.focus_set(), search_entry.icursor(tk.END)))
+
+    def on_key_down(event):
+        nonlocal suggestions_listbox
+        if suggestions_listbox and suggestions_window and suggestions_window.winfo_exists():
+            current_sel = suggestions_listbox.curselection()
+            if current_sel:
+                current_idx = current_sel[0]
+                next_idx = min(current_idx + 1, suggestions_listbox.size() - 1)
+                suggestions_listbox.selection_clear(0, tk.END)
+                suggestions_listbox.selection_set(next_idx)
+                suggestions_listbox.see(next_idx)
+            return "break"
+
+    def on_key_up(event):
+        nonlocal suggestions_listbox
+        if suggestions_listbox and suggestions_window and suggestions_window.winfo_exists():
+            current_sel = suggestions_listbox.curselection()
+            if current_sel:
+                current_idx = current_sel[0]
+                prev_idx = max(current_idx - 1, 0)
+                suggestions_listbox.selection_clear(0, tk.END)
+                suggestions_listbox.selection_set(prev_idx)
+                suggestions_listbox.see(prev_idx)
+            return "break"
+
     def on_focus_in(event):
         if search_entry.get() == placeholder_text:
             search_entry.delete(0, tk.END)
             search_entry.config(fg="#ffffff")
+        show_suggestions()
 
     def on_focus_out(event):
+        # If focus moves to suggestion list or during click, keep it open
+        focus_widget = root.focus_get()
+        if clicking_suggestion:
+            return
+        if suggestions_window and suggestions_window.winfo_exists():
+            if focus_widget is not None and (focus_widget == suggestions_window or focus_widget == suggestions_listbox or focus_widget.winfo_toplevel() == suggestions_window):
+                return
         if not search_entry.get():
             search_entry.insert(0, placeholder_text)
             search_entry.config(fg="grey")
+        hide_suggestions()
 
+    def on_key_release(event):
+        if event.keysym not in ('Down', 'Up', 'Return', 'Tab'):
+            show_suggestions()
+
+    def on_tab_key(event):
+        select_suggestion()
+        return "break"
+
+    def on_return_key(event):
+        # If suggestions visible, pick highlighted; else perform search
+        if suggestions_window and suggestions_window.winfo_exists():
+            select_suggestion()
+            return "break"
+        else:
+            return on_enter(event)
+
+    def on_ctrl_backspace(event):
+        # Delete previous word instead of single character
+        text = search_entry.get()
+        if text == placeholder_text:
+            search_entry.delete(0, tk.END)
+            search_entry.config(fg="#ffffff")
+            return "break"
+        cursor_pos = search_entry.index(tk.INSERT)
+        left = text[:cursor_pos]
+        right = text[cursor_pos:]
+        # Trim trailing spaces on the left, then drop last word
+        left_stripped = left.rstrip()
+        cut_pos = left_stripped.rfind(" ")
+        if cut_pos == -1:
+            new_left = ""
+        else:
+            new_left = left_stripped[:cut_pos + 1]
+        new_text = new_left + right
+        search_entry.delete(0, tk.END)
+        search_entry.insert(0, new_text)
+        search_entry.icursor(len(new_left))
+        show_suggestions()
+        return "break"
+    
     search_entry.bind("<FocusIn>", on_focus_in)
     search_entry.bind("<FocusOut>", on_focus_out)
-    search_entry.bind("<Return>", on_enter)
+    search_entry.bind("<Return>", on_return_key)
+    search_entry.bind("<KeyRelease>", on_key_release)
+    search_entry.bind("<Down>", on_key_down)
+    search_entry.bind("<Up>", on_key_up)
+    search_entry.bind("<Tab>", on_tab_key)
+    search_entry.bind("<Control-BackSpace>", on_ctrl_backspace)
     
     # Create search button with icon
     search_control = tk.Frame(search_frame, bg="#222222")

@@ -5,7 +5,7 @@ a = Analysis(
     ['menu.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('assets', 'assets')],
     hiddenimports=['plyer.platforms.win.notification', 'babel.numbers', 'tkcalendar'],
     hookspath=[],
     hooksconfig={},
