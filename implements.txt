@@ -17,12 +17,12 @@ search suggestion
     support multiple prefixed suggestion
     tab keeeps searchbox focused
 preview of hovering width and height
-
+Left/Right arrow keys now switch pages when the menu is visible
 
 
 to be implemented
 --------------------------
-show menu navigation
+
 
 
 installer:-  pyinstaller --name upmenu --onefile --noconsole --icon="assets/images/upmenu.ico" --hidden-import=plyer.platforms.win.notification "menu.py"

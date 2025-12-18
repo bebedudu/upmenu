@@ -154,6 +154,9 @@ third_page_frame = None  # Add this with other page variables
 menu_hidden = False  # Track if menu is manually hidden
 menu_enabled = True  # Track if menu is enabled to show
 
+# Store page switch handler for keyboard control
+switch_page_handler = None
+
 # Add these global variables at the top with other globals
 images = {}  # Dictionary to store all images
 
@@ -5097,6 +5100,10 @@ def create_arrow_buttons():
         
         # Show current page with full expansion
         pages[current_page].pack(fill=tk.BOTH, expand=True)
+
+    # Expose handler globally for keyboard bindings
+    global switch_page_handler
+    switch_page_handler = switch_page
     
     # Left arrow button
     left_arrow_frame = tk.Frame(canvas, bg="#222222")
@@ -5132,6 +5139,26 @@ def create_arrow_buttons():
 
 # Add arrow buttons to the menu
 left_arrow, right_arrow = create_arrow_buttons()
+
+# Keyboard shortcuts for page navigation when menu is visible
+def handle_left_key(event):
+    try:
+        if root.winfo_viewable() and switch_page_handler:
+            switch_page_handler("left")
+            return "break"
+    except Exception as e:
+        logging.error(f"Error handling left arrow key: {e}")
+
+def handle_right_key(event):
+    try:
+        if root.winfo_viewable() and switch_page_handler:
+            switch_page_handler("right")
+            return "break"
+    except Exception as e:
+        logging.error(f"Error handling right arrow key: {e}")
+
+root.bind("<Left>", handle_left_key)
+root.bind("<Right>", handle_right_key)
 
 # Initialize hover preview after functions are defined
 update_hover_preview()
